@@ -1,6 +1,6 @@
 # Android recorder
 
-Version: **0.1.0-dev** (policy-core development seed).
+Version: **0.1.0-dev2** (policy-core development seed).
 
 Research, design and Java policy core for a user-visible, long-running Android recorder.
 First device of interest: Xiaomi Mix Fold 4. Generic Android APIs come first;
@@ -15,9 +15,13 @@ Public project: [long-audio-recorder-android](https://github.com/Headmaster218/l
 - [Architecture and implementation plan](docs/architecture.md)
 - [Official-source findings](docs/research.md)
 - [Implemented policy core, integration contracts and test limits](docs/policy-core.md)
+- [Independent review, historical failures and final verification](docs/policy-core-review.md)
 
 Run the dependency-free core tests with `sh scripts/test-core.sh`. Tests currently
 run on JVM 21 with Java 8 source/classfile targets, not on Android or Java 8.
+The reviewed core passed 7,068 deterministic assertions and 14 independent
+adversarial cases. Assertion counts include repeated checks, not distinct
+scenarios. Real durable storage, transfers and phone recording remain untested.
 
 Goals include configurable audio/fragment settings, honest input routing and
 gap reporting, a bounded safe spool, and policy-controlled verified uploads.
