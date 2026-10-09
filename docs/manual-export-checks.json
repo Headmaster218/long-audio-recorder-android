@@ -1,0 +1,51 @@
+{
+  "status": "author checks passed; independent review and device acceptance pending",
+  "baseline_local_commit": "6e190a4188fd50c4f4d638806b88f32ae910c67e",
+  "version": "0.1.0-dev5",
+  "export_assertions": 288,
+  "regressions": {
+    "core_assertions": 7068,
+    "core_adversarial_cases": 14,
+    "storage_assertions": 389,
+    "storage_adversarial_cases": 11,
+    "app_safety_assertions": 58,
+    "app_adversarial_cases": 7
+  },
+  "cpu": 6,
+  "nice": 19,
+  "sampled_peak_tree_rss_bytes": 132509696,
+  "current_worktree_disk_bytes": 14622720,
+  "checks": [
+    {
+      "check": "android-source-compile",
+      "exit_code": 0
+    },
+    {
+      "check": "app-wiring",
+      "exit_code": 0
+    },
+    {
+      "check": "buffer-linkage",
+      "exit_code": 0
+    },
+    {
+      "check": "export-wiring",
+      "exit_code": 0
+    },
+    {
+      "check": "export",
+      "exit_code": 0
+    },
+    {
+      "check": "regressions",
+      "exit_code": 0
+    }
+  ],
+  "not_done": [
+    "Android runtime/provider/Activity instrumentation",
+    "D8/APK build or signing",
+    "upload or remote publication",
+    "SMB/FTP",
+    "source deletion or automatic retention"
+  ]
+}

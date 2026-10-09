@@ -1,5 +1,8 @@
 # Visible Android recorder source slice
 
+This page records the dev4 recorder baseline. The dev5 source candidate appends
+[manual SAF export](manual-export.md); it does not change capture/service logic.
+
 Development version 0.1.0-dev4 adds actual Android app/service source above the
 reviewed dev3 JVM policy and storage layers. Independent source/helper review and
 an official-SDK unsigned rebuild have passed. Local test signing is separate

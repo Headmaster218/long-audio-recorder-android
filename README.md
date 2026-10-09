@@ -1,15 +1,16 @@
 # Android recorder
 
-Version: **0.1.0-dev4** (development Android recorder).
+Version: **0.1.0-dev5** (manual verified-export source candidate).
 
 Native Android app source with a reviewed Java policy/storage core for a visible recorder.
 First device of interest: Xiaomi Mix Fold 4. Generic Android APIs come first;
 device-specific workarounds require measured evidence on the actual device.
 
-**Status: independently reviewed native Android Activity/microphone service source,
-2026-10-09. Official-SDK rebuild, JVM regressions, local test-key signing and
-static APK verification pass. The separately delivered APK is a development test
-build, not a production release. The app has not been installed or run on a device.**
+**Status: dev5 manual SAF export source candidate, 2026-10-09. Synthetic JVM
+export checks, existing regressions and official-SDK Java source compilation pass.
+Independent dev5 review and Android runtime testing are pending. No dev5 APK has
+been built, signed, uploaded or released. The separately delivered dev4 test APK
+is unchanged and does not contain this feature.**
 This is an independent Git repository for the Android recorder project.
 Public project: [long-audio-recorder-android](https://github.com/Headmaster218/long-audio-recorder-android).
 
@@ -19,6 +20,7 @@ Public project: [long-audio-recorder-android](https://github.com/Headmaster218/l
 - [Independent review, historical failures and final verification](docs/policy-core-review.md)
 - [WAV writer/storage development slice and limits](docs/wav-storage.md)
 - [Independent WAV/storage review and preserved failure evidence](docs/wav-storage-review.md)
+- [Manual SAF export, safety boundaries and verification](docs/manual-export.md)
 - [Android app behavior, build path and incomplete features](docs/android-app.md)
 - [Independent Android review, original failures and final verification](docs/android-app-review.md)
 
@@ -51,7 +53,8 @@ storage adversarial cases and a targeted Java-8 buffer-linkage check. Run
 These results do not establish full Java-8/Android compatibility, actual
 power-loss/process-death durability, sustained performance or 24-hour capture.
 The Android source now wires the reviewed storage layer to microphone capture.
-Upload, export, verified server handoff and recording deletion remain unimplemented.
+Manual SAF export is implemented in this dev5 source candidate. Upload, verified
+server handoff and recording deletion remain unimplemented.
 
 ## Android development app
 
@@ -63,9 +66,24 @@ addition to all policy/storage regressions, four source-wiring checks and a
 fresh official-SDK unsigned build. These checks do not run Android lifecycle,
 permissions, AudioRecord, notifications or filesystem behavior.
 
-Missing product functions include export/upload, verified backend transfer,
+Missing product functions include automatic upload, SMB/FTP and verified backend transfer,
 retention/deletion, durable cross-process resume, headset input selection and
 complete runtime event history. Windows builds, Xiaomi/OEM behavior, UI usability,
 screen-off recording, real process/power loss, battery/thermal behavior and
 24-hour operation remain untested. A development APK is for explicit testing;
 continuous capture is not yet an accepted capability.
+
+## Manual export source candidate
+
+Use the export controls below the recorder controls to load completed segments,
+select one WAV and choose a destination in Android’s system file picker. Copying
+and SHA-256/byte-count readback run on one background worker with a 32 KiB buffer.
+Only immutable `.ready` objects with matching bounded metadata are eligible;
+`.part` objects and symlink/path substitutions are rejected. All source files are
+kept for verified, unverified, failed and cancelled outcomes.
+
+A successful readback means the selected provider returned the same bytes at that
+moment. It does not confirm cloud sync, server durability, SMB/FTP transfer or
+safe deletion. Interrupted copies can leave an empty or partial destination.
+See [manual export](docs/manual-export.md) for limits and device-test requirements.
+Run `sh scripts/test-export.sh` for the new host logic tests.

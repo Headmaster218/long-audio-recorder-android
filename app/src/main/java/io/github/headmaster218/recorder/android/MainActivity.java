@@ -23,6 +23,7 @@ public final class MainActivity extends Activity {
     private final Handler main = new Handler(Looper.getMainLooper());
     private EditText rate, channels, seconds, cache;
     private TextView status;
+    private ExportControls exports;
     private Button start, pause, stop;
     private boolean resumed, pendingPermissionStart;
     private RecordingSettings pending;
@@ -34,6 +35,7 @@ public final class MainActivity extends Activity {
             boolean running = RecorderState.active;
             start.setEnabled(!running); pause.setEnabled(running);
             rate.setEnabled(!running); channels.setEnabled(!running); seconds.setEnabled(!running); cache.setEnabled(!running);
+            exports.render();
             main.postDelayed(this,1000);
         }
     };
@@ -43,7 +45,7 @@ public final class MainActivity extends Activity {
         column.setOrientation(LinearLayout.VERTICAL); int pad = (int) (20 * getResources().getDisplayMetrics().density); column.setPadding(pad,pad,pad,pad);
         scroll.addView(column); setContentView(scroll);
         text(column,"Recorder · development build",24);
-        text(column,"Visible phone microphone recording. PCM16 WAV, local storage only. No uploads or automatic deletion. Screen-off and long-run behavior are unverified.",16);
+        text(column,"Visible phone microphone recording. PCM16 WAV in private local storage. No automatic uploads or deletion. Manual SAF export is available below. Screen-off and long-run behavior are unverified.",16);
         rate = number(column,"Sample rate (Hz)","16000",101);
         channels = number(column,"Channels: 1 mono or 2 stereo","1",102);
         seconds = number(column,"Segment duration (seconds)","300",103);
@@ -53,9 +55,12 @@ public final class MainActivity extends Activity {
         pause = button(column,"Pause",new View.OnClickListener() { @Override public void onClick(View v) { command(RecordingService.PAUSE); } });
         stop = button(column,"Stop",new View.OnClickListener() { @Override public void onClick(View v) { command(RecordingService.STOP); } });
         status = text(column,"Idle",16);
-        text(column,"Pause ends this AudioRecord run. Resume within the same process uses a new run and uncertain epoch. After process restart, Start creates a fresh capture. Stop ends the capture. App recreation never restarts recording. Files remain app-private until a reviewed export/transfer feature exists.",14);
+        text(column,"Pause ends this AudioRecord run. Resume within the same process uses a new run and uncertain epoch. After process restart, Start creates a fresh capture. Stop ends the capture. App recreation never restarts recording. Completed files can be copied with the manual export controls below; all originals remain app-private.",14);
         text(column,"Android may let you dismiss the ongoing notification. A swipe alone does not stop recording or trigger forced reposts. Reopen this app for Stop/Pause; Android microphone/active-app controls remain available where supported.",14);
+        exports = new ExportControls(this,column,saved);
     }
+    @Override protected void onSaveInstanceState(Bundle out) { super.onSaveInstanceState(out); exports.saveState(out); }
+    @Override protected void onActivityResult(int request,int result,Intent data) { super.onActivityResult(request,result,data); exports.result(request,result,data); }
     private TextView text(LinearLayout parent,String value,int size) { TextView t = new TextView(this); t.setText(value); t.setTextSize(size); t.setPadding(0,10,0,10); parent.addView(t); return t; }
     private EditText number(LinearLayout p,String label,String value,int id) {
         text(p,label,15); EditText e = new EditText(this); e.setId(id); e.setSingleLine(true); e.setInputType(InputType.TYPE_CLASS_NUMBER); e.setText(value); p.addView(e); return e;

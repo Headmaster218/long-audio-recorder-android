@@ -6,8 +6,8 @@ android {
         applicationId 'io.github.headmaster218.recorder.android'
         minSdk 29
         targetSdk 37
-        versionCode 4
-        versionName '0.1.0-dev4'
+        versionCode 5
+        versionName '0.1.0-dev5'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_1_8; targetCompatibility JavaVersion.VERSION_1_8 }
     buildTypes { release { minifyEnabled false } }
