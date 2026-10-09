@@ -1,15 +1,15 @@
 # Android recorder
 
-Version: **0.1.0-dev4-source** (unsigned Android app candidate).
+Version: **0.1.0-dev4** (development Android recorder).
 
 Native Android app source with a reviewed Java policy/storage core for a visible recorder.
 First device of interest: Xiaomi Mix Fold 4. Generic Android APIs come first;
 device-specific workarounds require measured evidence on the actual device.
 
-**Status: native Android Activity/microphone service source and an unsigned SDK-built APK,
-2026-10-09. Core/storage JVM regressions pass. The app remains unsigned, uninstalled,
-not device-tested and pending independent app review. No Gradle/runtime dependency
-or signing key was downloaded.**
+**Status: independently reviewed native Android Activity/microphone service source,
+2026-10-09. Official-SDK rebuild, JVM regressions, local test-key signing and
+static APK verification pass. The separately delivered APK is a development test
+build, not a production release. The app has not been installed or run on a device.**
 This is an independent Git repository for the Android recorder project.
 Public project: [long-audio-recorder-android](https://github.com/Headmaster218/long-audio-recorder-android).
 
@@ -19,6 +19,8 @@ Public project: [long-audio-recorder-android](https://github.com/Headmaster218/l
 - [Independent review, historical failures and final verification](docs/policy-core-review.md)
 - [WAV writer/storage development slice and limits](docs/wav-storage.md)
 - [Independent WAV/storage review and preserved failure evidence](docs/wav-storage-review.md)
+- [Android app behavior, build path and incomplete features](docs/android-app.md)
+- [Independent Android review, original failures and final verification](docs/android-app-review.md)
 
 Run the dependency-free core tests with `sh scripts/test-core.sh`. Tests currently
 run on JVM 21 with Java 8 source/classfile targets, not on Android or Java 8.
@@ -39,20 +41,31 @@ Never conceal recording or silently discard unverified recordings.
 
 Initial environment check found Git and a Java runtime. It did not find javac,
 Gradle, adb, sdkmanager, kotlinc, an Android SDK environment variable, or an SDK
-in the common paths inspected. The existing runtime does provide the Java
-compiler module used by the core test script. No tools were installed.
+in the common paths inspected. The existing runtime provides the Java compiler
+module. A minimal official API-37 SDK/build-tools subset was subsequently installed
+and hash-verified for the direct Linux build. No Gradle dependencies were downloaded.
 
 The reviewed WAV/storage slice passed 389 storage assertions, 11 independent
 storage adversarial cases and a targeted Java-8 buffer-linkage check. Run
 `sh scripts/test-storage.sh` and `sh scripts/test-storage-adversarial.sh`.
 These results do not establish full Java-8/Android compatibility, actual
 power-loss/process-death durability, sustained performance or 24-hour capture.
-No Android recording implementation, upload adapter or deletion adapter is included.
+The Android source now wires the reviewed storage layer to microphone capture.
+Upload, export, verified server handoff and recording deletion remain unimplemented.
 
-## Android app candidate
+## Android development app
 
-The new [native app/service slice](docs/android-app.md) adds a visible microphone
+The [native app/service slice](docs/android-app.md) adds a visible microphone
 foreground service, bounded capture queue, local WAV spool, runtime permission
-flow and basic configuration UI. An offline unsigned APK build is available for
-static inspection. It is not signed, installed or device-tested; independent
-app review is still required. No signing key or dependency was downloaded.
+flow and basic configuration UI. Independent review of production `86d9269`
+passed at `546b317`: 58 helper assertions and seven app adversarial cases in
+addition to all policy/storage regressions, four source-wiring checks and a
+fresh official-SDK unsigned build. These checks do not run Android lifecycle,
+permissions, AudioRecord, notifications or filesystem behavior.
+
+Missing product functions include export/upload, verified backend transfer,
+retention/deletion, durable cross-process resume, headset input selection and
+complete runtime event history. Windows builds, Xiaomi/OEM behavior, UI usability,
+screen-off recording, real process/power loss, battery/thermal behavior and
+24-hour operation remain untested. A development APK is for explicit testing;
+continuous capture is not yet an accepted capability.

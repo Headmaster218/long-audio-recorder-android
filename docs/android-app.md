@@ -1,8 +1,10 @@
 # Visible Android recorder source slice
 
-Candidate 0.1.0-dev4-source. This adds actual Android app/service source above the
-reviewed dev3 JVM policy and storage layers. It is not signed, installed, run on
-a device, or verified for 24-hour capture, screen-off behavior or battery use.
+Development version 0.1.0-dev4 adds actual Android app/service source above the
+reviewed dev3 JVM policy and storage layers. Independent source/helper review and
+an official-SDK unsigned rebuild have passed. Local test signing is separate
+from runtime acceptance: no installation, device run, 24-hour capture, screen-off
+behavior or battery validation has occurred.
 
 ## Behavior and boundaries
 
@@ -108,9 +110,9 @@ Production Android code uses anonymous callbacks because the SDK bootclasspath
 does not provide javac's LambdaMetafactory bootstrap. No host-JDK fallback or
 fake platform stub was added to bypass that failure.
 
-The output is UNSIGNED and cannot be installed as-is. Signing, package validation,
-independent source review, runtime permissions/lifecycle tests and real-device
-checks remain gates. Core/storage JVM scripts now select only the core source
+This script output is UNSIGNED and cannot be installed as-is. Signing and package
+validation are separate local packaging steps. Independent source review passed;
+runtime permissions/lifecycle tests and real-device checks remain gates. Core/storage JVM scripts now select only the core source
 package so they do not accidentally compile Android APIs against a host JDK.
 
 Windows intent: keep Java/native Android source and the Gradle layout portable;
@@ -150,7 +152,8 @@ targeted NIO Java-8 linkage check passed on the Android-bootclasspath classfiles
 Regression execution/compilation took 5.34 seconds, sampled total RSS 104.54 MiB.
 These tests do not execute Android services, Activity lifecycle, permission UI,
 AudioRecord, notifications, real audio routing or device filesystem behavior.
-Independent app review and those runtime acceptance tests remain required.
+That candidate later underwent independent review; see the final receipt below.
+The runtime acceptance tests remain required.
 
 ## Narrow review corrections
 
@@ -174,4 +177,54 @@ The corrected unsigned SDK artifact is
 Explicit Android-bootclasspath javac, aapt2, D8, zipalign, packaged-manifest dumps
 and the targeted compiled-buffer linkage check passed. Sampled build RSS including
 the observer was 129.83 MiB. No signing, installation or Android runtime test
-occurred. Independent confirmation of the two corrections is still pending.
+occurred in that author build. Independent confirmation subsequently passed at
+`546b317200bdef06c686aa82037aaef719210638`; see [the final review receipt](android-app-review.md).
+
+## Reviewed dev4 source status
+
+The reviewed production snapshot is `86d926938863a7ddcd23ea53227593dda6e4ef0b`.
+The final review preserves the original failure findings and records all six JVM
+suites, four source-wiring checks, targeted buffer linkage and an independent
+SDK build. The dev4 preparation only updates version metadata and documentation;
+production behavior remains that reviewed snapshot. Local test APK signing and
+static package verification do not expand the review to Android runtime behavior.
+
+
+## Dev4 test APK packaging receipt
+
+On 2026-10-09, the reviewed production source was rebuilt with versionName
+`0.1.0-dev4` / versionCode `4`, using the installed official API-37 SDK and
+build-tools 37.0.0. The version/documentation preparation makes no production
+logic changes relative to `86d9269`. One local development signing key was
+generated outside Git; key material and passwords are excluded from source,
+Git history, recovery archives and delivered files. This is not a release key.
+
+The separate artifact `long-audio-recorder-0.1.0-dev4-debug.apk` is 49,425 bytes.
+SHA-256: `c4612c331fd3d03184e56fc2dc8eb5404127ea9842b1075df9ade18529981fe2`.
+Official apksigner verification succeeds for the declared API 29–37 range with
+one RSA-2048 signer and a verified v3 signature. Final zip alignment passes.
+All four uncompressed members match the unsigned build exactly; no extra
+libraries, assets, network permission or exported service were introduced.
+The package remains `io.github.headmaster218.recorder.android`, min API 29,
+target API 37; backup and cleartext traffic are disabled. The test certificate
+SHA-256 is `d211d45d69e6965031173483471a5c0282d758f7f61023adfcee14f5853ada19`.
+
+The first signing attempt supplied the same password file twice; the second
+read reached EOF. Retrying with the same key and its store password succeeded;
+no replacement key was generated. Signature verification, rather than successful
+command launch, is the acceptance evidence.
+
+The six reviewed JVM suites passed again (7,068 core assertions, 14 policy cases,
+389 storage assertions, 11 storage cases, 58 app helper assertions, seven app
+adversarial cases), along with four source-wiring checks and targeted buffer
+linkage. Build sampled observer-plus-child RSS was 137.18 MiB; the final
+regression/package-verification run sampled 110.71 MiB. CPU 6 / nice 19 and
+256 MiB RSS / 24 MiB generated-output guards remained active. These are sampled
+observations, not kernel-enforced maximum guarantees.
+
+No installation or Android runtime/device test occurred. Export/upload, verified
+backend transfer, deletion/retention, durable cross-process resume, headset
+selection and complete runtime event history remain unimplemented. Static
+packaging success does not establish recording quality, notification/lifecycle
+behavior, screen-off capture, actual disk-full/process/power-loss safety,
+battery/thermal behavior or 24-hour operation.
