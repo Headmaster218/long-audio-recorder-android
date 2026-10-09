@@ -5,6 +5,12 @@ Date: 2026-10-09. Scope: pure-Java writer and local spool contracts, synthetic
 fixtures on the current JVM/filesystem. No SDK, Android build/device, downloads,
 real recordings, network, power interruption, or actual recording deletion.
 
+**Final result:** all three findings below were corrected and independently
+rechecked at `9d6ee022aa9b3559151d59ca6e2b3afcfea85c2a`. All 11 expanded storage
+review cases, the original storage/policy suites and the targeted linkage check
+pass. The original failures are preserved as historical evidence; see the final
+recheck section for exact results and remaining platform limits.
+
 ## Result: corrections required
 
 ### 1. Newly created spool roots lack parent-directory durability ordering
@@ -129,3 +135,72 @@ and queue behavior remain unmeasured. No 24-hour capture readiness is implied.
 After coordinated corrections, rerun both storage suites, the policy regressions
 and the targeted linkage checker, then append the exact corrected commit and
 results here without replacing this original failure evidence.
+
+## Final independent recheck
+
+Corrected production commit: `9d6ee022aa9b3559151d59ca6e2b3afcfea85c2a`.
+Original review/test evidence commit: `ff3dddc846db03d5440e7cd13b05e6c36d33a88b`.
+No production code was changed during this independent recheck.
+
+### Verified corrections
+
+1. Initialization creates at most a missing leaf under a caller-established
+   durable parent hierarchy. Root sync is followed by parent sync before
+   admission, including for an existing root. Parent-sync failure releases
+   ownership and admits no audio; missing ancestor directories remain absent.
+2. WAV verification invokes `clear()` through `java.nio.Buffer`. The targeted
+   compiled-class check finds no Java-9 covariant ByteBuffer references.
+3. Partial recovery enforces the allowed entry set. If interrupted finalization
+   left a manifest, its checksum, intent binding, exact WAV header/length and
+   both content hashes must validate. Failures are reported as corruption,
+   preserving all evidence. Even a valid partial object is never promoted or
+   granted upload permission by a scan.
+
+The independent suite also now exercises a single 20,004-byte input across both
+8 KiB storage-call boundaries and 5,000-frame segment boundaries, verifying
+byte-exact reconstruction and the short final tail.
+
+### Final command results
+
+```text
+sh scripts/test-storage.sh
+PASS: 389 WAV/storage assertions; synthetic local JVM fixtures only
+
+sh scripts/test-storage-adversarial.sh
+PASS arbitrary offset buffers preserve exact mono/stereo/32-channel frames
+PASS large input crosses both 8 KiB chunks and exact segment cuts
+PASS partial-frame epoch change preserves all bytes and becomes terminal
+PASS format changes start a new uncertain epoch
+PASS cache denial precedes payload growth
+PASS raw/full hashes and checksummed identity substitution
+PASS failure after actual rename requires recovery confirmation
+PASS new spool root requires durable parent reachability
+PASS unexpected partial entries are reported and preserved
+PASS parent-sync failure blocks admission and absent ancestors stay absent
+PASS interrupted manifests validate before conservative recovery reporting
+Independent storage review: 11 cases passed, 0 cases failed
+
+CoreTest against the same compiled production sources
+PASS: 7068 deterministic assertions; Java policy core only
+
+AdversarialCoreTest against the same compiled production sources
+Independent review: 14 cases passed, 0 cases failed
+
+python3 scripts/check-java8-buffer-linkage.py app/build/storage-review/classes
+PASS targeted Java-8 buffer linkage check; full platform compatibility remains unverified
+```
+
+All Java execution used the existing JVM 21, Java-8 source/classfile targets and
+32 MiB heap/metaspace limits, under CPU 6/nice 19. The original storage
+compile/test took 4.58 seconds with a sampled observer-plus-child peak of
+120.73 MiB; the independent compile/test took 3.27 seconds and 119.84 MiB.
+Policy regression execution took 0.31 seconds and 46.28 MiB. No 128 MiB/time
+guard triggered. Total worktree size before this report update was 6,212 KiB,
+within the 8 MiB ceiling; generated fixtures remain preserved. `git diff --check`
+passed, and no compiler/test process remained after completion.
+
+No identified finding remains open for this limited Java/local-filesystem
+slice. This does not certify Java-8 runtime or Android API compatibility beyond
+the targeted linkage issue, physical crash/power-loss durability, hostile/shared
+directories, sustained performance, battery behavior, real devices or 24-hour
+recording. Those acceptance gates remain explicitly unimplemented or untested.

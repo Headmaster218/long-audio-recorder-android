@@ -102,6 +102,16 @@ public final class AdversarialStorageTest {
         check(Arrays.equals(bytes, store.pending.toByteArray()), "every partial byte retained");
         rejected(() -> writer.append(new byte[] {6, 7, 8}, 0, 3));
     }
+    private static void largeInputRemainsChunked() throws Exception {
+        MemoryStore store = new MemoryStore();
+        PcmSegmentWriter writer = new PcmSegmentWriter(store, epoch(1, 0), 5000, 0, p -> { });
+        byte[] bytes = new byte[20004];
+        for (int i = 0; i < bytes.length; i++) bytes[i] = (byte) (i * 13);
+        writer.append(bytes, 0, bytes.length); writer.stop();
+        check(store.maximumAppend == 8192, "large input is actually split at the 8 KiB storage boundary");
+        check(store.manifests.size() == 3 && store.manifests.get(2).frameCount == 2, "chunk and segment boundaries compose");
+        check(Arrays.equals(bytes, store.complete.toByteArray()), "cross-chunk and cross-segment bytes remain exact");
+    }
     private static void formatEpochs() throws Exception {
         MemoryStore store = new MemoryStore();
         PcmSegmentWriter writer = new PcmSegmentWriter(store, epoch(1, 0), 5, 0, p -> { });
@@ -189,8 +199,50 @@ public final class AdversarialStorageTest {
             check(Files.size(extra) == 1, "unexpected bytes are preserved");
         }
     }
+    private static void parentSyncFailureBlocksAdmission() throws Exception {
+        Path parent = fixture().toAbsolutePath(); Path root = parent.resolve("spool");
+        List<Path> synced = new ArrayList<Path>();
+        DirectorySpool.DirectoryProtocol failing = new DirectorySpool.DirectoryProtocol() {
+            private final DirectorySpool.NioProtocol nio = new DirectorySpool.NioProtocol();
+            @Override public void syncDirectory(Path p) throws IOException {
+                synced.add(p);
+                if (p.equals(parent)) throw new IOException("parent sync failed");
+                nio.syncDirectory(p);
+            }
+            @Override public void atomicPublish(Path a, Path b) { throw new AssertionError("must never admit recording"); }
+        };
+        rejected(() -> new DirectorySpool(root, new CachePolicy(1000000, 0), failing, (op, p) -> { }));
+        check(synced.size() == 2 && synced.get(0).equals(root) && synced.get(1).equals(parent), "root then parent before admission");
+        try (DirectorySpool reopened = open(root)) { check(scan(reopened).isEmpty(), "failed admission releases lock and creates no audio"); }
+        Path absentParent = parent.resolve("missing-ancestor");
+        rejected(() -> open(absentParent.resolve("spool")));
+        check(!Files.exists(absentParent), "missing ancestors are never created implicitly");
+    }
+    private static void interruptedManifestValidation() throws Exception {
+        for (boolean corruptManifest : new boolean[] {true, false}) {
+            Path root = fixture(); List<Published> results = new ArrayList<Published>();
+            try (DirectorySpool spool = new DirectorySpool(root, new CachePolicy(1000000, 0),
+                    new DirectorySpool.NioProtocol(), (op, p) -> {
+                        if (op == Operation.PUBLISH) throw new IOException("interrupted before rename");
+                    })) {
+                PcmSegmentWriter writer = new PcmSegmentWriter(spool, epoch(1, 0), 2, 0, results::add);
+                rejected(() -> writer.append(new byte[] {2, 4, 6, 8}, 0, 4));
+                Recovery initial = scan(spool).get(0);
+                check(initial.state == RecoveryState.PRESERVED_PARTIAL && results.isEmpty(), "valid interrupted finalization is never promoted");
+                rejected(() -> spool.confirmReady(initial.localObjectId));
+                Path object = root.resolve(initial.localObjectId);
+                Path changed = object.resolve(corruptManifest ? "manifest.bin" : "audio.wav");
+                byte[] bytes = Files.readAllBytes(changed);
+                bytes[corruptManifest ? bytes.length - 1 : 44] ^= 1;
+                Files.write(changed, bytes, StandardOpenOption.TRUNCATE_EXISTING);
+                check(scan(spool).get(0).state == RecoveryState.CORRUPT_PRESERVED, "present manifest's checksum and content hashes must validate");
+                check(Arrays.equals(bytes, Files.readAllBytes(changed)), "corruption reporting does not rewrite or delete evidence");
+            }
+        }
+    }
     public static void main(String[] args) {
         run("arbitrary offset buffers preserve exact mono/stereo/32-channel frames", AdversarialStorageTest::boundedExactFrames);
+        run("large input crosses both 8 KiB chunks and exact segment cuts", AdversarialStorageTest::largeInputRemainsChunked);
         run("partial-frame epoch change preserves all bytes and becomes terminal", AdversarialStorageTest::partialEpochPreserved);
         run("format changes start a new uncertain epoch", AdversarialStorageTest::formatEpochs);
         run("cache denial precedes payload growth", AdversarialStorageTest::cacheRejectsBeforeGrowth);
@@ -198,6 +250,8 @@ public final class AdversarialStorageTest {
         run("failure after actual rename requires recovery confirmation", AdversarialStorageTest::postRenameRecovery);
         run("new spool root requires durable parent reachability", AdversarialStorageTest::newRootMustBeDurablyReachable);
         run("unexpected partial entries are reported and preserved", AdversarialStorageTest::unexpectedPartialEntriesReported);
+        run("parent-sync failure blocks admission and absent ancestors stay absent", AdversarialStorageTest::parentSyncFailureBlocksAdmission);
+        run("interrupted manifests validate before conservative recovery reporting", AdversarialStorageTest::interruptedManifestValidation);
         System.out.println("Independent storage review: " + passed + " cases passed, " + failed + " cases failed");
         if (failed != 0) throw new AssertionError("storage review failures: " + failed);
     }
