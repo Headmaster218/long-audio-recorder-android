@@ -185,7 +185,7 @@ All 15 named storage-operation fault hooks were exercised. Final compile plus
 these suites took 4.23 seconds on CPU 6/nice 19; sampled compiler/test peak RSS
 was 95.54 MiB, or 104.41 MiB including its observer. The final test script uses
 32 MiB Java heaps. These are sampled local measurements, not strict cgroup peaks
-or benchmarks. Independent review of this new storage slice is still required.
+or benchmarks. Independent review was pending at that stage; its final outcome is recorded below.
 
 After the first independent review, the author corrected bounded root/parent
 initialization ordering, the Java-9 buffer linkage reference, and partial-entry/
@@ -193,5 +193,19 @@ interrupted-manifest validation. The corrective run passed 389 storage assertion
 all 8 existing independent storage cases, 7,068 policy assertions, 14 policy
 adversarial cases and the targeted compiled-buffer linkage check. It took 4.98
 seconds on CPU 6/nice 19, with sampled child RSS 96.71 MiB and observer-plus-child
-RSS 105.58 MiB. Independent confirmation of these fixes is still required; the
+RSS 105.58 MiB. Independent confirmation was pending at that stage; the
 original failures remain recorded in `wav-storage-review.md`.
+
+## Final independent verification for 0.1.0-dev3
+
+Production `9d6ee022aa9b3559151d59ca6e2b3afcfea85c2a` was independently
+rechecked in review commit `48d962404b143148bbdf49d532080a70f8eb9819`.
+The final run passed 389 storage assertions, all 11 expanded storage adversarial
+cases, 7,068 policy assertions, all 14 policy adversarial cases and the targeted
+compiled-buffer linkage check. See [the complete review](wav-storage-review.md)
+for the preserved original failures, fixes, measurements and limitations.
+
+No identified finding remains open for this limited pure-Java/local-filesystem
+slice. Full Java-8 runtime/API and Android compatibility, actual power loss or
+process death, hostile/shared filesystems, sustained performance, battery and
+real-device behavior, and 24-hour capture remain unvalidated.

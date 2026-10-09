@@ -1,12 +1,13 @@
 # Android recorder
 
-Version: **0.1.0-dev2** (policy-core development seed).
+Version: **0.1.0-dev3** (WAV/storage development seed).
 
-Research, design and Java policy core for a user-visible, long-running Android recorder.
+Research, design and Java policy/storage core for a user-visible, long-running Android recorder.
 First device of interest: Xiaomi Mix Fold 4. Generic Android APIs come first;
 device-specific workarounds require measured evidence on the actual device.
 
-**Status: Java policy/metadata core and deterministic JVM tests, 2026-10-09.
+**Status: Java policy/metadata core, bounded WAV writer and local spool,
+with deterministic JVM and synthetic local-filesystem tests, 2026-10-09.
 No APK, Android application implementation, SDK, Gradle wrapper, downloaded
 dependencies, Android build, or device validation.**
 This is an independent Git repository for the Android recorder project.
@@ -17,6 +18,7 @@ Public project: [long-audio-recorder-android](https://github.com/Headmaster218/l
 - [Implemented policy core, integration contracts and test limits](docs/policy-core.md)
 - [Independent review, historical failures and final verification](docs/policy-core-review.md)
 - [WAV writer/storage development slice and limits](docs/wav-storage.md)
+- [Independent WAV/storage review and preserved failure evidence](docs/wav-storage-review.md)
 
 Run the dependency-free core tests with `sh scripts/test-core.sh`. Tests currently
 run on JVM 21 with Java 8 source/classfile targets, not on Android or Java 8.
@@ -40,5 +42,9 @@ Gradle, adb, sdkmanager, kotlinc, an Android SDK environment variable, or an SDK
 in the common paths inspected. The existing runtime does provide the Java
 compiler module used by the core test script. No tools were installed.
 
-The unreviewed WAV/storage development slice can be checked with
-`sh scripts/test-storage.sh`. It adds no Android implementation or upload adapter.
+The reviewed WAV/storage slice passed 389 storage assertions, 11 independent
+storage adversarial cases and a targeted Java-8 buffer-linkage check. Run
+`sh scripts/test-storage.sh` and `sh scripts/test-storage-adversarial.sh`.
+These results do not establish full Java-8/Android compatibility, actual
+power-loss/process-death durability, sustained performance or 24-hour capture.
+No Android recording implementation, upload adapter or deletion adapter is included.
