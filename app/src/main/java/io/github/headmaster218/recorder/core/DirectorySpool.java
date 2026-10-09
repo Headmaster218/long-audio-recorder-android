@@ -81,15 +81,23 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
     public DirectorySpool(Path root, CachePolicy cache, DirectoryProtocol protocol, Faults faults) throws IOException {
         if (root == null || cache == null || protocol == null || faults == null) throw new IllegalArgumentException();
         this.root = root.toAbsolutePath().normalize(); this.cache = cache; this.protocol = protocol; this.faults = faults;
-        Files.createDirectories(this.root);
-        if (Files.isSymbolicLink(this.root)) throw new IOException("spool root cannot be a symlink");
+        Path parent = this.root.getParent();
+        // Bounded initialization: the caller supplies an already durably established parent hierarchy.
+        if (parent == null || !Files.isDirectory(parent, LinkOption.NOFOLLOW_LINKS))
+            throw new IOException("spool parent must already exist as an established directory");
+        if (!Files.exists(this.root, LinkOption.NOFOLLOW_LINKS)) Files.createDirectory(this.root);
+        if (!Files.isDirectory(this.root, LinkOption.NOFOLLOW_LINKS))
+            throw new IOException("spool root must be a directory, not a symlink");
         FileChannel channel = FileChannel.open(this.root.resolve(".writer.lock"), StandardOpenOption.CREATE,
             StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS);
         FileLock acquired = null;
         try {
             try { acquired = channel.tryLock(); } catch (OverlappingFileLockException e) { throw new IOException("spool already owned", e); }
             if (acquired == null) throw new IOException("spool already owned");
-            protocol.syncDirectory(this.root); // Unsupported durability blocks admission before recording.
+            protocol.syncDirectory(this.root);
+            // The parent entry makes this root reachable after restart. Do this even if another
+            // cooperating creator made the root before this constructor acquired the lock.
+            protocol.syncDirectory(parent); // Unsupported/failed durability blocks recording admission.
         } catch (IOException | RuntimeException e) {
             try { if (acquired != null) acquired.release(); }
             catch (IOException closeFailure) { e.addSuppressed(closeFailure); }
@@ -211,7 +219,7 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
             full.update(header.array()); ByteBuffer block = ByteBuffer.allocate(8192); long seen = WavHeader.BYTES;
             int n; while ((n = c.read(block)) != -1) {
                 if (n == 0) throw new IOException("zero-progress WAV read");
-                full.update(block.array(), 0, n); pcm.update(block.array(), 0, n); seen += n; block.clear();
+                full.update(block.array(), 0, n); pcm.update(block.array(), 0, n); seen += n; ((java.nio.Buffer) block).clear();
                 if (seen > expectedSize) throw new IOException("WAV changed during verification");
             }
             if (seen != expectedSize) throw new IOException("WAV truncated during verification");
@@ -229,25 +237,33 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
             && Arrays.equals(header.array(), WavHeader.encode(intent.epoch.format, dataBytes / frameBytes));
         if (!placeholder && !finalized) throw new IOException("corrupt staged WAV header; retain without salvage assertion");
     }
-    private SegmentMetadata validate(Path directory) throws IOException {
-        op(Operation.VALIDATE, directory);
-        int entries = 0;
+    private static boolean checkEntries(Path directory, boolean requireManifest) throws IOException {
+        boolean intent = false, wav = false, manifest = false;
         try (DirectoryStream<Path> files = Files.newDirectoryStream(directory)) {
             for (Path p : files) {
+                if (!regular(p)) throw new IOException("unexpected nested/symlink object entry");
                 String name = p.getFileName().toString();
-                if (!(name.equals(INTENT) || name.equals(WAV) || name.equals(MANIFEST)) || !regular(p))
-                    throw new IOException("unexpected finalized object entry");
-                entries++;
+                if (name.equals(INTENT)) intent = true;
+                else if (name.equals(WAV)) wav = true;
+                else if (name.equals(MANIFEST)) manifest = true;
+                else throw new IOException("unexpected object entry; preserve all bytes");
             }
         }
-        if (entries != 3) throw new IOException("incomplete finalized object");
-        Intent intent = SegmentMetadata.decodeIntent(readSmall(directory.resolve(INTENT)));
+        if (!intent || !wav || (requireManifest && !manifest)) throw new IOException("incomplete object");
+        return manifest;
+    }
+    private static SegmentMetadata checkManifest(Path directory, Intent intent) throws IOException {
         SegmentMetadata m = SegmentMetadata.decode(readSmall(directory.resolve(MANIFEST)));
-        if (!SegmentMetadata.sameIntent(intent, m.intent) || !directory.getFileName().toString().equals(id(intent) + ".ready"))
-            throw new IOException("object identity/intent mismatch");
+        if (!SegmentMetadata.sameIntent(intent, m.intent)) throw new IOException("manifest/intent mismatch");
         String[] hashes = hashWav(directory.resolve(WAV), intent, m.frameCount);
         if (!m.pcmSha256.equals(hashes[0]) || !m.wavSha256.equals(hashes[1])) throw new IOException("content hash mismatch");
         return m;
+    }
+    private SegmentMetadata validate(Path directory) throws IOException {
+        op(Operation.VALIDATE, directory); checkEntries(directory, true);
+        Intent intent = SegmentMetadata.decodeIntent(readSmall(directory.resolve(INTENT)));
+        if (!directory.getFileName().toString().equals(id(intent) + ".ready")) throw new IOException("object identity mismatch");
+        return checkManifest(directory, intent);
     }
     /** Revalidate and re-sync existing final objects; enumeration alone never grants upload eligibility. */
     public Published confirmReady(String localObjectId) throws IOException {
@@ -274,11 +290,14 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
                         SegmentMetadata m = validate(dir);
                         result = new Recovery(name, RecoveryState.FINALIZED_UNCONFIRMED, m.frameCount, 0, "re-sync and revalidate before upload");
                     } else {
+                        boolean hasManifest = checkEntries(dir, false);
                         Intent i = SegmentMetadata.decodeIntent(readSmall(dir.resolve(INTENT)));
                         if (!name.equals(id(i) + ".part") || !regular(dir.resolve(WAV))) throw new IOException("partial identity mismatch");
                         long data = Files.size(dir.resolve(WAV)) - WavHeader.BYTES;
                         if (data < 0 || data > i.epoch.format.bytesForFrames(i.targetFrames)) throw new IOException("invalid staged size");
                         checkStagedHeader(dir.resolve(WAV), i, data);
+                        // Interrupted finalization evidence cannot be ignored merely because the name is .part.
+                        if (hasManifest) checkManifest(dir, i);
                         long frameBytes = i.epoch.format.channels * 2L;
                         result = new Recovery(name, RecoveryState.PRESERVED_PARTIAL, data / frameBytes, data % frameBytes,
                             "observed frames only; no durable-prefix, header, content or continuity assertion");

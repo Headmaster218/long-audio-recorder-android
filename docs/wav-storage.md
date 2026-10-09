@@ -72,6 +72,15 @@ restart. No staged or published identity is overwritten, reclaimed or deleted.
 
 ## Ordered write and publication contract
 
+Initialization is bounded to one spool-root directory. Its parent must already
+exist as a caller-established durable hierarchy; no recursive ancestor creation
+is attempted. The constructor can create only the missing leaf root. Under its
+exclusive lock it syncs the root and its immediate parent before admitting any
+PCM, including when the root already exists, so a concurrent cooperating creator
+cannot leave the reachability step unacknowledged. Failure or unsupported sync
+blocks admission. This does not establish durability of previously unpersisted
+ancestors supplied by the caller.
+
 For a newly reserved object:
 
 1. Check the cache ceiling and disk reserve before growth; exclusively create its
@@ -110,7 +119,10 @@ security boundary against arbitrary mutation of ancestor directories or files.
 - `PRESERVED_PARTIAL`: valid intent, plausible bounded WAV size and canonical
   placeholder/final header. Reports observed whole frames and trailing bytes.
   The prefix is only a salvage candidate. It is not a durable-prefix guarantee,
-  a checksum proof of every sample, or a continuity assertion.
+  a checksum proof of every sample, or a continuity assertion. Only intent, WAV
+  and an optional interrupted-finalization manifest are allowed. If the manifest
+  exists, its checksum, intent binding, exact final WAV header/length and both
+  content hashes must validate, or the whole object is reported corrupt.
 - `CORRUPT_PRESERVED`: missing/truncated/malformed intent, corrupt WAV header,
   invalid finalized metadata/hash/length, unexpected files or other corruption.
   Preserve all files and expose the blocker.
@@ -151,7 +163,11 @@ also provide bounded queueing, permission/routing events and lawful restarts.
 
 Run `sh scripts/test-storage.sh`. It uses the installed compiler module with
 Java-8 source/classfile targets and JVM 21, without dependencies or Android tools.
-Java-8 runtime/API and Android compatibility remain unverified. Fixtures are tiny
+Java-8 runtime/API and Android compatibility remain unverified. The known NIO
+covariant-return trap is avoided by calling `clear()` through `java.nio.Buffer`;
+`scripts/check-java8-buffer-linkage.py` checks compiled references for that narrow
+class of Java-9 API linkage. A passed targeted check is not a full platform API
+compatibility certification. Fixtures are tiny
 synthetic bytes in ignored `app/build/storage-tests/`; no downloaded or user audio
 is read. Corruption tests deliberately alter only those synthetic fixtures.
 
@@ -163,10 +179,19 @@ exclusive ownership, unsupported directory sync/atomic rename and callback failu
 True process termination/power loss, Android behavior, hostile filesystems,
 physical block quotas, performance/battery use and real storage media are not tested.
 
-Author verification on OpenJDK 21.0.12.1: 361 storage assertions, the unchanged
+Initial author verification on OpenJDK 21.0.12.1: 361 storage assertions, the unchanged
 7,068 policy-core assertions and 14 existing policy adversarial cases passed.
 All 15 named storage-operation fault hooks were exercised. Final compile plus
 these suites took 4.23 seconds on CPU 6/nice 19; sampled compiler/test peak RSS
 was 95.54 MiB, or 104.41 MiB including its observer. The final test script uses
 32 MiB Java heaps. These are sampled local measurements, not strict cgroup peaks
 or benchmarks. Independent review of this new storage slice is still required.
+
+After the first independent review, the author corrected bounded root/parent
+initialization ordering, the Java-9 buffer linkage reference, and partial-entry/
+interrupted-manifest validation. The corrective run passed 389 storage assertions,
+all 8 existing independent storage cases, 7,068 policy assertions, 14 policy
+adversarial cases and the targeted compiled-buffer linkage check. It took 4.98
+seconds on CPU 6/nice 19, with sampled child RSS 96.71 MiB and observer-plus-child
+RSS 105.58 MiB. Independent confirmation of these fixes is still required; the
+original failures remain recorded in `wav-storage-review.md`.

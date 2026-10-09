@@ -220,8 +220,76 @@ public final class StorageTest {
             eq(47, Files.size(torn.resolve(r.localObjectId).resolve("audio.wav")));
         }
     }
+    private static void initializationReachability() throws Exception {
+        Path parent = root().toAbsolutePath(); Path missing = parent.resolve("spool");
+        List<Path> synced = new ArrayList<Path>();
+        DirectorySpool.DirectoryProtocol tracking = new DirectorySpool.DirectoryProtocol() {
+            private final DirectorySpool.NioProtocol nio = new DirectorySpool.NioProtocol();
+            @Override public void syncDirectory(Path p) throws IOException { nio.syncDirectory(p); synced.add(p); }
+            @Override public void atomicPublish(Path a, Path b) throws IOException { nio.atomicPublish(a, b); }
+        };
+        try (DirectorySpool spool = new DirectorySpool(missing, new CachePolicy(100000, 0), tracking, (op, p) -> { })) {
+            yes(Files.isDirectory(missing)); yes(synced.contains(missing)); yes(synced.contains(parent));
+            yes(synced.indexOf(missing) < synced.indexOf(parent)); eq(0, scan(spool).size());
+        }
+        Path absentParent = parent.resolve("not-established");
+        fails(() -> open(absentParent.resolve("spool"))); yes(!Files.exists(absentParent));
+        Path failedRoot = parent.resolve("parent-sync-fails");
+        DirectorySpool.DirectoryProtocol failing = new DirectorySpool.DirectoryProtocol() {
+            private final DirectorySpool.NioProtocol nio = new DirectorySpool.NioProtocol();
+            @Override public void syncDirectory(Path p) throws IOException {
+                if (p.equals(parent)) throw new IOException("injected parent sync failure");
+                nio.syncDirectory(p);
+            }
+            @Override public void atomicPublish(Path a, Path b) throws IOException { throw new AssertionError("no recording admission"); }
+        };
+        fails(() -> new DirectorySpool(failedRoot, new CachePolicy(100000, 0), failing, (op, p) -> { }));
+        try (DirectorySpool reopened = open(failedRoot)) { eq(0, scan(reopened).size()); }
+    }
+    private static void partialEvidenceValidation() throws Exception {
+        Path extraRoot = root();
+        try (DirectorySpool spool = open(extraRoot)) {
+            PcmSegmentWriter w = new PcmSegmentWriter(spool, epoch(1, 0, "phone"), 10, 0, p -> { });
+            w.append(new byte[] {1, 2, 3}, 0, 3); fails(w::stop);
+            Path object = extraRoot.resolve(scan(spool).get(0).localObjectId);
+            byte[] original = Files.readAllBytes(object.resolve("audio.wav"));
+            Path extra = object.resolve("unverified-extra"); Files.write(extra, new byte[] {99});
+            yes(scan(spool).get(0).state == RecoveryState.CORRUPT_PRESERVED);
+            eq(1, Files.size(extra)); yes(Arrays.equals(original, Files.readAllBytes(object.resolve("audio.wav"))));
+        }
+        for (int variant = 0; variant < 3; variant++) {
+            Path root = root();
+            try (DirectorySpool spool = open(root, 1000000, (op, path) -> {
+                if (op == Operation.PUBLISH) throw new IOException("preserve interrupted finalization");
+            })) {
+                PcmSegmentWriter w = new PcmSegmentWriter(spool, epoch(1, 0, "phone"), 2, 0, p -> { });
+                fails(() -> w.append(new byte[] {4, 3, 2, 1}, 0, 4));
+                Recovery before = scan(spool).get(0); yes(before.state == RecoveryState.PRESERVED_PARTIAL);
+                Path object = root.resolve(before.localObjectId); Path manifest = object.resolve("manifest.bin");
+                byte[] bytes = Files.readAllBytes(manifest);
+                if (variant == 0) {
+                    bytes[bytes.length - 1] ^= 1; Files.write(manifest, bytes, StandardOpenOption.TRUNCATE_EXISTING);
+                } else if (variant == 1) {
+                    SegmentMetadata existing = SegmentMetadata.decode(bytes);
+                    Epoch other = new Epoch("other-capture", "run", 0, PcmFormat.DEFAULT, "phone", "phone", Gap.START);
+                    CaptureTimeline timeline = new CaptureTimeline(other, 2, 0); timeline.appendFrames(2);
+                    SegmentMetadata replacement = new SegmentMetadata(new SegmentMetadata.Intent(other, 0, 0, 2),
+                        timeline.seal(existing.pcmSha256, CaptureTimeline.Close.ROTATION), existing.wavSha256);
+                    Files.write(manifest, replacement.encode(), StandardOpenOption.TRUNCATE_EXISTING);
+                } else {
+                    Path wav = object.resolve("audio.wav"); byte[] audio = Files.readAllBytes(wav); audio[44] ^= 1;
+                    Files.write(wav, audio, StandardOpenOption.TRUNCATE_EXISTING);
+                }
+                byte[] audioBefore = Files.readAllBytes(object.resolve("audio.wav"));
+                byte[] metadataBefore = Files.readAllBytes(manifest);
+                yes(scan(spool).get(0).state == RecoveryState.CORRUPT_PRESERVED);
+                yes(Arrays.equals(audioBefore, Files.readAllBytes(object.resolve("audio.wav"))));
+                yes(Arrays.equals(metadataBefore, Files.readAllBytes(manifest)));
+            }
+        }
+    }
     public static void main(String[] args) throws Exception {
-        headers(); arbitraryBuffers(); epochTransitions(); partialRecovery(); boundedCache(); publicationFaults(); corruptionAndOwnership(); extraFailureEdges();
+        headers(); arbitraryBuffers(); epochTransitions(); partialRecovery(); boundedCache(); publicationFaults(); corruptionAndOwnership(); extraFailureEdges(); initializationReachability(); partialEvidenceValidation();
         System.out.println("PASS: " + checks + " WAV/storage assertions; synthetic local JVM fixtures only");
     }
 }
