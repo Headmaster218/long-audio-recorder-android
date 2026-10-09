@@ -92,3 +92,36 @@ will naturally reach those values.
 
 No SDK, dependencies, network, keys, remote repository, or actual deletion was
 used. Implementation changes and post-fix evidence are tracked separately.
+
+## Intermediate correction review
+
+Implementation correction: `c062313a4016b6cf367941bd4a4064a94b17febe`.
+The independent harness was adapted to the deliberately stricter deletion API
+without retaining any evidence-free overload. It now covers all fourteen
+receipt identity/version fields, guard invalidation/replacement/consumption,
+and 64 ANY/ALL automatic-trigger combinations. The original evidence above is
+preserved rather than replaced.
+
+Against sources materialized directly from `c062313`, the adapted harness
+reported 13 named cases passing and 1 failing. Both original quota regressions
+passed. The remaining result was:
+
+```text
+FAIL already-in-flight overflow reconciliation returns false: reconciling observed overflow must also return false
+Independent review: 13 cases passed, 1 cases failed
+```
+
+Reproducer: with both limits `Long.MAX_VALUE`, reserve 1 and
+`Long.MAX_VALUE - 1`. Record 2 against the first reservation; that correctly
+returns false. Reconcile `Long.MAX_VALUE - 1` bytes already in flight against
+the second reservation. The cumulative value saturates, but this call returns
+true because the per-reservation amount fits and the saturated total compares
+equal to the limit. It must also return false whenever either cumulative
+addition overflows. Stopping further emission does not remove the need to
+account already-in-flight bytes.
+
+This run took 2.12 seconds on CPU 6/nice 19. A corrected `/proc/*/stat` process
+tree observer sampled 115.17 MiB of child RSS, or 124.67 MiB including the
+observer, below the 192 MiB stop threshold. Sampling is not a kernel-enforced
+or unsampled-peak guarantee. Host available memory and free disk were checked
+before the run; no compiler/test process remained afterward.

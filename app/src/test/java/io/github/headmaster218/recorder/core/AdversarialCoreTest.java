@@ -5,9 +5,12 @@ import io.github.headmaster218.recorder.core.CaptureTimeline.Epoch;
 import io.github.headmaster218.recorder.core.CaptureTimeline.Gap;
 import io.github.headmaster218.recorder.core.CaptureTimeline.SegmentManifest;
 import io.github.headmaster218.recorder.core.DeletionGate.Receipt;
+import io.github.headmaster218.recorder.core.DeletionGate.ObjectBinding;
+import io.github.headmaster218.recorder.core.DeletionGate.Guard;
 import io.github.headmaster218.recorder.core.DeletionGate.State;
 import io.github.headmaster218.recorder.core.DeletionGate.Verification;
 import io.github.headmaster218.recorder.core.TransferPolicy.Block;
+import io.github.headmaster218.recorder.core.TransferPolicy.AutomaticTriggers;
 import io.github.headmaster218.recorder.core.TransferPolicy.Network;
 
 /** Independent review cases; run separately with scripts/test-core-adversarial.sh. */
@@ -118,6 +121,24 @@ public final class AdversarialCoreTest {
                 "hard gate mismatch: config=" + c + ", network=" + n + ", charging=" + power);
         }
     }
+    private static void automaticTriggerComposition() {
+        Network wifi = new Network(true, true, false, false, false, false);
+        for (AutomaticTriggers strategy : AutomaticTriggers.values()) {
+            for (int ageEnabled = 0; ageEnabled < 2; ageEnabled++) for (int bits = 0; bits < 16; bits++) {
+                boolean bytes = (bits & 1) != 0, age = (bits & 2) != 0;
+                boolean stopped = (bits & 4) != 0, manual = (bits & 8) != 0;
+                TransferPolicy policy = new TransferPolicy(true, true, false, false, false,
+                    10, ageEnabled == 1 ? 100 : -1, strategy);
+                boolean automatic = strategy == AutomaticTriggers.ANY
+                    ? bytes || (ageEnabled == 1 && age) : bytes && (ageEnabled == 0 || age);
+                Block got = policy.evaluate(bytes ? 10 : 1, age ? 100 : 0, stopped, manual, true, wifi);
+                check(got == (automatic || stopped || manual ? Block.NONE : Block.NOT_TRIGGERED),
+                    "automatic strategy=" + strategy + ", age enabled=" + ageEnabled + ", mask=" + bits);
+                check(policy.evaluate(bytes ? 10 : 1, age ? 100 : 0, stopped, true, false, wifi)
+                    == Block.NOT_CHARGING, "manual trigger never bypasses charging");
+            }
+        }
+    }
     private static void reservationRecovery() {
         QuotaLedger q = new QuotaLedger(100, 200, 10, 1, 0, 0);
         QuotaLedger.Reservation a = q.reserve(40), b = q.reserve(60);
@@ -146,6 +167,9 @@ public final class AdversarialCoreTest {
         // Saturation or an explicit persistent exhausted state must preserve fail-closed recovery.
         check(s.dailyCharged >= Long.MAX_VALUE && s.monthlyCharged >= Long.MAX_VALUE,
             "overrun with pending reservations must remain durably exhausted");
+        QuotaLedger recovered = new QuotaLedger(Long.MAX_VALUE, Long.MAX_VALUE, s.day, s.month,
+            s.dailyCharged, s.monthlyCharged);
+        equal(0, recovered.availableBytes(), "saturated snapshot restores exhausted budget");
     }
     private static void observedCounterOverflowFailsClosed() {
         QuotaLedger q = new QuotaLedger(Long.MAX_VALUE, Long.MAX_VALUE, 0, 0,
@@ -160,11 +184,25 @@ public final class AdversarialCoreTest {
         check(q.reserve(1) == null, "no further reservation after unaccountable observed traffic");
         q.snapshot();
     }
+    private static void reconciledCounterOverflowReturnsFalse() {
+        QuotaLedger q = new QuotaLedger(Long.MAX_VALUE, Long.MAX_VALUE, 0, 0, 0, 0);
+        QuotaLedger.Reservation a = q.reserve(1), b = q.reserve(Long.MAX_VALUE - 1);
+        check(!q.recordBytes(a, 2), "first overrun reports stop");
+        // These bytes can already be in flight. Stopping emission does not remove the need to account them.
+        check(!q.recordBytes(b, Long.MAX_VALUE - 1), "reconciling observed overflow must also return false");
+        equal(Long.MAX_VALUE, q.snapshot().dailyCharged, "reconciliation saturation stays persistable");
+        equal(0, q.availableBytes(), "reconciliation cannot reauthorize I/O");
+    }
     private static Receipt receipt(int changed) {
         return new Receipt(changed == 1 ? "other-fragment" : "capture/0",
             changed == 2 ? "other-destination" : "nas", changed == 3 ? "other-payload" : "payload",
             changed == 4 ? "other-metadata" : "metadata", changed == 5 ? "other-commit" : "commit",
-            changed == 6 ? 101 : 100, changed == 7 ? D : A, changed == 8 ? D : B, changed == 9 ? D : C);
+            changed == 6 ? 101 : 100, changed == 7 ? D : A, changed == 8 ? D : B, changed == 9 ? D : C,
+            new ObjectBinding(changed == 10 ? "other-local" : "local-object",
+                changed == 11 ? "other-local-version" : "local-version",
+                changed == 12 ? "other-payload-version" : "payload-version",
+                changed == 13 ? "other-metadata-version" : "metadata-version",
+                changed == 14 ? "other-commit-version" : "commit-version"));
     }
     private static DeletionGate verified() {
         DeletionGate gate = new DeletionGate(receipt(0), true, true);
@@ -172,30 +210,56 @@ public final class AdversarialCoreTest {
         return gate;
     }
     private static void receiptIdentityBinding() {
-        for (int field = 1; field <= 9; field++) {
+        for (int field = 1; field <= 14; field++) {
             final Receipt wrong = receipt(field);
             DeletionGate gate = verified();
+            Guard guard = new Guard(receipt(0), "operation-" + field);
             rejected(() -> gate.committed(wrong, Verification.TRUSTED_SERVER_SHA256, true));
             check(gate.state() == State.REMOTE_VERIFIED, "wrong receipt preserves verified-only state");
             gate.committed(receipt(0), Verification.TRUSTED_SERVER_SHA256, true);
             rejected(() -> gate.receiptPersisted(wrong));
-            check(!gate.finalObjectsRechecked(receipt(0), Verification.TRUSTED_SERVER_SHA256),
+            check(!gate.finalObjectsRechecked(receipt(0), Verification.TRUSTED_SERVER_SHA256, guard),
                 "wrong persisted receipt never enables delete");
             gate.receiptPersisted(receipt(0));
-            check(!gate.finalObjectsRechecked(wrong, Verification.TRUSTED_SERVER_SHA256),
+            check(!gate.finalObjectsRechecked(wrong, Verification.TRUSTED_SERVER_SHA256, guard),
                 "wrong final object identity never enables delete");
         }
     }
     private static void finalRecheckRevokesPermission() {
         DeletionGate gate = verified();
+        Guard guard = new Guard(receipt(0), "operation");
         gate.committed(receipt(0), Verification.TRUSTED_SERVER_SHA256, true);
         gate.receiptPersisted(receipt(0));
-        check(gate.finalObjectsRechecked(receipt(0), Verification.TRUSTED_SERVER_SHA256), "valid receipt eligible");
-        check(!gate.finalObjectsRechecked(receipt(7), Verification.TRUSTED_SERVER_SHA256), "changed content revokes");
-        rejected(() -> gate.localDeletionAcknowledged());
-        check(gate.finalObjectsRechecked(receipt(0), Verification.TRUSTED_SERVER_SHA256), "restored evidence eligible");
-        check(!gate.finalObjectsRechecked(receipt(0), null), "missing verification method revokes");
-        rejected(() -> gate.localDeletionAcknowledged());
+        check(gate.finalObjectsRechecked(receipt(0), Verification.TRUSTED_SERVER_SHA256, guard), "valid receipt eligible");
+        check(!gate.finalObjectsRechecked(receipt(7), Verification.TRUSTED_SERVER_SHA256, guard), "changed content revokes");
+        rejected(() -> gate.localDeletionAcknowledged(guard));
+        check(gate.finalObjectsRechecked(receipt(0), Verification.TRUSTED_SERVER_SHA256, guard), "restored evidence eligible");
+        check(!gate.finalObjectsRechecked(receipt(0), null, guard), "missing verification method revokes");
+        rejected(() -> gate.localDeletionAcknowledged(guard));
+    }
+    private static void guardedDeletionLifetime() {
+        DeletionGate gate = verified();
+        gate.committed(receipt(0), Verification.TRUSTED_SERVER_SHA256, true);
+        gate.receiptPersisted(receipt(0));
+        check(!gate.finalObjectsRechecked(receipt(0), Verification.TRUSTED_SERVER_SHA256, null), "missing guard blocks");
+        Guard stale = new Guard(receipt(0), "first-operation");
+        check(gate.finalObjectsRechecked(receipt(0), Verification.TRUSTED_SERVER_SHA256, stale), "live guard permits");
+        stale.invalidate();
+        check(gate.state() == State.REMOTE_COMMITTED, "lease loss revokes eligibility");
+        rejected(() -> gate.localDeletionAcknowledged(stale));
+        check(!gate.finalObjectsRechecked(receipt(0), Verification.TRUSTED_SERVER_SHA256, stale), "invalid guard cannot revive");
+        for (int field = 1; field <= 14; field++) {
+            check(!gate.finalObjectsRechecked(receipt(0), Verification.TRUSTED_SERVER_SHA256,
+                new Guard(receipt(field), "wrong-binding")), "guard identity mismatch blocks: " + field);
+        }
+        Guard first = new Guard(receipt(0), "same-label"), replacement = new Guard(receipt(0), "same-label");
+        check(gate.finalObjectsRechecked(receipt(0), Verification.TRUSTED_SERVER_SHA256, first), "first guard eligible");
+        check(gate.finalObjectsRechecked(receipt(0), Verification.TRUSTED_SERVER_SHA256, replacement), "new check replaces guard");
+        rejected(() -> gate.localDeletionAcknowledged(first));
+        gate.localDeletionAcknowledged(replacement);
+        check(gate.state() == State.LOCAL_DELETED, "exact held guard acknowledges delete");
+        check(!replacement.isActive(), "successful deletion consumes guard");
+        rejected(() -> gate.localDeletionAcknowledged(replacement));
     }
     public static void main(String[] args) {
         run("PCM exact arithmetic boundaries", AdversarialCoreTest::pcmLimits);
@@ -204,11 +268,14 @@ public final class AdversarialCoreTest {
         run("cache limits cannot overflow or evict", AdversarialCoreTest::cacheArithmetic);
         run("16 trigger combinations", AdversarialCoreTest::triggerTruthTable);
         run("4096 hard-gate combinations, including Upload now", AdversarialCoreTest::constraintTruthTable);
+        run("64 ANY/ALL, age-enable and manual/stop trigger combinations", AdversarialCoreTest::automaticTriggerComposition);
         run("concurrent reservation accounting and crash restoration", AdversarialCoreTest::reservationRecovery);
         run("overrun snapshot remains persistable", AdversarialCoreTest::overrunSnapshotRemainsPersistable);
         run("observed counter overflow fails closed", AdversarialCoreTest::observedCounterOverflowFailsClosed);
-        run("all nine receipt identity fields reject substitutions", AdversarialCoreTest::receiptIdentityBinding);
+        run("already-in-flight overflow reconciliation returns false", AdversarialCoreTest::reconciledCounterOverflowReturnsFalse);
+        run("all fourteen receipt identity/version fields reject substitutions", AdversarialCoreTest::receiptIdentityBinding);
         run("failed final recheck revokes delete eligibility", AdversarialCoreTest::finalRecheckRevokesPermission);
+        run("guard loss, identity mismatch, replacement and consumption", AdversarialCoreTest::guardedDeletionLifetime);
         System.out.println("Independent review: " + passed + " cases passed, " + failed + " cases failed");
         if (failed != 0) throw new AssertionError("independent review failures: " + failed);
     }
