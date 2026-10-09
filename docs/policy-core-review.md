@@ -4,6 +4,12 @@ Review baseline: `f285ac583269929f2704e336c94ead77cd1792ec`, 2026-10-09.
 This review concerns the dependency-free Java contracts only. It is not an
 Android build, device test, storage-durability test, or network integration test.
 
+**Final result:** all identified core findings were corrected and independently
+retested at `a396faf950bbf4643fc73246bf79d29878b668b3`. The original and
+intermediate failure evidence below is historical and deliberately preserved.
+See the final verification section for passing results and remaining integration
+requirements.
+
 ## Original adversarial evidence
 
 Run `sh scripts/test-core-adversarial.sh` separately from the author's original
@@ -71,7 +77,7 @@ will naturally reach those values.
   interruptions and avoiding invented continuity.
 - Cache checks return stop-and-alert without an eviction operation. Estimates,
   free-space races, and durable finalization remain adapter responsibilities.
-- The existing policy implements ANY triggers and ALL hard constraints.
+- At the original baseline, policy implemented ANY triggers and ALL hard constraints.
   Upload now does not bypass charging, transport, metering, or roaming gates.
   Quota remains a separate operation which the coordinator must apply before
   every bounded I/O operation. This is a documented first slice, not the full
@@ -125,3 +131,62 @@ tree observer sampled 115.17 MiB of child RSS, or 124.67 MiB including the
 observer, below the 192 MiB stop threshold. Sampling is not a kernel-enforced
 or unsampled-peak guarantee. Host available memory and free disk were checked
 before the run; no compiler/test process remained afterward.
+
+## Final verification
+
+Production commit tested: `a396faf950bbf4643fc73246bf79d29878b668b3`.
+Independent test/evidence commit: `3639f74aac42a198d2d497e0ac8b5c98cc007ac5`.
+Both full local commands completed successfully against the final production
+sources, with no implementation changes after testing:
+
+```text
+sh scripts/test-core.sh
+PASS: 7068 deterministic assertions; Java policy core only
+
+sh scripts/test-core-adversarial.sh
+PASS PCM exact arithmetic boundaries
+PASS epoch counter overflow preserves pending tail
+PASS invalid format transition is atomic
+PASS cache limits cannot overflow or evict
+PASS 16 trigger combinations
+PASS 4096 hard-gate combinations, including Upload now
+PASS 64 ANY/ALL, age-enable and manual/stop trigger combinations
+PASS concurrent reservation accounting and crash restoration
+PASS overrun snapshot remains persistable
+PASS observed counter overflow fails closed
+PASS already-in-flight overflow reconciliation returns false
+PASS all fourteen receipt identity/version fields reject substitutions
+PASS failed final recheck revokes delete eligibility
+PASS guard loss, identity mismatch, replacement and consumption
+Independent review: 14 cases passed, 0 cases failed
+```
+
+The original suite took 2.49 seconds; sampled compiler/test RSS was 103.34 MiB,
+or 112.84 MiB including the observer. The independent suite took 2.06 seconds;
+sampled compiler/test RSS was 106.94 MiB, or 116.44 MiB including the observer.
+Both inherited CPU 6 and nice 19. No 192 MiB/time guard triggered. Generated
+build output totaled 728 KiB; total checkout/build/Git storage remains below
+the 10 MiB review allowance. `git diff --check` passed. No test/compiler
+process remained, and the working tree was clean before this report update.
+
+### Resolution
+
+- Observed-byte counters and crash snapshots saturate conservatively instead
+  of throwing away accounting. Overflow during in-flight reconciliation now
+  returns false even when that reservation's amount fits.
+- Automatic byte/age triggers support explicit ANY/ALL composition. Stop and
+  Upload now are separate triggers; charging and network restrictions remain
+  mandatory gates. The coordinator must still apply the separate quota ledger.
+- Deletion receipts bind immutable local identity/generation and all three
+  remote object versions. Missing, mismatched, invalidated or replaced guards
+  cannot acknowledge deletion. Completion consumes the exact held guard.
+- The integration contract explicitly requires atomic ordered quota snapshot
+  persistence, stale-worker fencing, protected remote versions, and guarded
+  local identity verification/deletion. These are obligations for future
+  adapters, not capabilities supplied by the Java guard object.
+
+No remaining finding blocks this limited pure-Java core slice. Real persistent
+stores, leases/immutability, network-bound I/O, Android compilation and phone
+recording still require implementation and failure/race tests. Passing these
+tests does not authorize shipping an actual deletion adapter or claim reliable
+24-hour Android capture.
