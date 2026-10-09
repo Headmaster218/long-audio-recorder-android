@@ -16,12 +16,14 @@ Public project: [long-audio-recorder-android](https://github.com/Headmaster218/l
 - [Official-source findings](docs/research.md)
 - [Implemented policy core, integration contracts and test limits](docs/policy-core.md)
 - [Independent review, historical failures and final verification](docs/policy-core-review.md)
+- [WAV writer/storage development slice and limits](docs/wav-storage.md)
 
 Run the dependency-free core tests with `sh scripts/test-core.sh`. Tests currently
 run on JVM 21 with Java 8 source/classfile targets, not on Android or Java 8.
 The reviewed core passed 7,068 deterministic assertions and 14 independent
 adversarial cases. Assertion counts include repeated checks, not distinct
-scenarios. Real durable storage, transfers and phone recording remain untested.
+scenarios. The separate WAV/storage slice has synthetic local-filesystem tests; real
+power-loss durability, transfers and phone recording remain untested.
 
 Goals include configurable audio/fragment settings, honest input routing and
 gap reporting, a bounded safe spool, and policy-controlled verified uploads.
@@ -37,3 +39,6 @@ Initial environment check found Git and a Java runtime. It did not find javac,
 Gradle, adb, sdkmanager, kotlinc, an Android SDK environment variable, or an SDK
 in the common paths inspected. The existing runtime does provide the Java
 compiler module used by the core test script. No tools were installed.
+
+The unreviewed WAV/storage development slice can be checked with
+`sh scripts/test-storage.sh`. It adds no Android implementation or upload adapter.
