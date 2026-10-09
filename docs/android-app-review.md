@@ -5,6 +5,12 @@ Scope: Android source/security/lifecycle review, existing unsigned SDK-build
 evidence, and bounded logic/build checks. No signing, installation, emulator,
 device access, keys, real microphone input or 24-hour runtime test.
 
+**Final review result:** the two source blockers below were corrected at
+`86d926938863a7ddcd23ea53227593dda6e4ef0b`. Independent helper tests, integration
+source checks and an official-SDK unsigned rebuild pass. Original failure traces
+remain preserved. This is not device/runtime acceptance or a signed release;
+see the final independent receipt below.
+
 ## Original findings: two behavior corrections required
 
 ### 1. Persisted pause state can authorize stale epoch reuse after process death
@@ -127,3 +133,103 @@ changes, microphone privacy/silencing, screen-off recording, real disk-full and
 crash durability, performance, battery/thermal behavior, and sustained capture.
 No signed/installable release, Android runtime acceptance or all-day recording
 claim follows from source review or an unsigned SDK build.
+
+## Final independent receipt
+
+Production snapshot tested: `86d926938863a7ddcd23ea53227593dda6e4ef0b`.
+Original independent findings: `f10027439164ef100bdf6eee57dfa3bc53884242`.
+No production source was changed by the reviewer after this snapshot.
+
+### Corrected behavior and integration
+
+- The service obtains resume authority only by consuming the process-local
+  `CleanPauseGate` held by RecorderState. It does not read SharedPreferences to
+  authorize capture/epoch reuse. New process state starts with no token. Explicit
+  Stop, errors and starts clear the capability; a failed start cannot reuse an
+  already consumed token. Persisted paused=false is supplementary, not the fence.
+- Every positive AudioRecord read is accounted before route attribution or
+  enqueue can fail. A block is acknowledged only after the whole writer append
+  returns successfully. Final reconciliation is after producer termination, and
+  the conservative warning is prepended so bounded status cannot truncate it.
+  Held, queued, in-flight and partial-frame sample counts are covered. Overflow
+  retains an unknown-count warning even when saturated numeric differences are
+  zero. This accounting does not measure driver losses or prove durable samples
+  after a real power failure.
+- Notification swipes continue recording as agreed. The Activity and development
+  documentation now explain dismissibility; no stop-on-dismiss, active-notification
+  disappearance stop, or forced repost loop was introduced.
+
+### Logic and source checks
+
+`sh scripts/test-app-review.sh` compiles the production core/helpers and all
+JVM tests once, then executes these suites:
+
+```text
+CoreTest: 7068 assertions passed
+AdversarialCoreTest: 14 named cases passed
+StorageTest: 389 assertions passed
+AdversarialStorageTest: 11 named cases passed
+AppRunSafetyTest: 58 helper assertions passed
+AdversarialAppRunSafetyTest: 7 named cases passed
+```
+
+The seven new independent cases cover process-boundary and one-shot tokens,
+revocation/invalid inputs, two simultaneous token consumers, empty-queue
+in-flight plus held partial-frame accounting, atomic rejection/full drain,
+saturation preserving uncertainty, and concurrent read/ack updates. These
+execute actual production helpers on JVM 21; they do not simulate or execute
+Android Activity, Service, permissions, notifications or AudioRecord.
+
+`python3 scripts/check-app-review-wiring.py` also passes its four narrow source
+checks: resume authorization, accounting call order/reconciliation, notification/
+foreground-start policy, and manifest boundaries. The targeted NIO linkage check
+passes against the Android-bootclasspath production classfiles. Source assertions
+and a targeted linkage check are not a complete Android API/runtime verifier.
+
+### Independent unsigned SDK build
+
+The independent build used the installed official API-37 SDK and build-tools
+37.0.0, with an explicit Android bootclasspath and minimum API 29. Resource
+compilation/linking, javac, D8, APK assembly, zipalign verification and packaged
+manifest/badging inspection completed successfully. No fake platform stubs,
+host-JDK fallback for production compilation, dependency downloads, signing
+keys, emulator or installation were used.
+
+Independent output:
+
+```text
+app/build/direct-1791567407065995529/recorder-unsigned.apk
+43597 bytes
+SHA-256 f633757f8612b67d89dde66e77e44e92f2bdf80941e460aa4c11fcccb20001b2
+```
+
+The corrected author artifact was independently rehashed:
+
+```text
+app/build/direct-1791567111804337549/recorder-unsigned.apk
+43597 bytes
+SHA-256 d864989d28571ce3e8c5ea76f203c2d13b8fc1cbe45c6c34bdddde5c6624890a
+```
+
+All four uncompressed APK member names and content hashes match between the
+author and independent builds. The `classes.dex` ZIP entry timestamp differs,
+so these are content-equivalent builds, not byte-for-byte reproducible archives.
+Both checks found no META-INF signing entries or APK signing-block magic. Neither
+artifact is presented as signed or installable. Build directories preserve the
+manifest dump, alignment result, generated classes/dex and build receipt.
+
+### Resources and stopping point
+
+All build/test processes inherited CPU 6/nice 19. The independent build sampled
+131.80 MiB observer-plus-child RSS; the consolidated regression run took 5.43
+seconds and sampled 117.25 MiB. The 256 MiB sampled process-tree cap, 24 MiB
+generated-disk cap, 2 GiB host-memory headroom, and main-project free-disk floor
+plus reservation remained guarded. No guard triggered. The build completed
+before its 17:40 UTC deadline. Worktree size after verification was 6,940 KiB;
+build output remains well below the generated-disk limit. These are sampled
+measurements, not kernel-enforced peak guarantees.
+
+No test/compiler/build process remained after completion, and CPU 6 was released.
+`git diff --check` passed. No identified source blocker remains open within this
+limited review. Permission/lifecycle/device/filesystem/thermal/battery and
+continuous 24-hour recording acceptance remain unperformed, as listed above.
