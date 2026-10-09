@@ -76,7 +76,11 @@ It is deliberately not a transfer receipt that grants deletion eligibility.
 ## Lifecycle, repetition and bounded work
 
 `ExportSession` is a synchronized process-local single-flight state machine.
-Duplicate clicks cannot queue more scans/copies; stale picker/session callbacks
+Selection binds the spinner index to the exact immutable Page snapshot displayed
+by that Activity. If another Activity has replaced the shared page, the stale
+selection is rejected before journal changes or picker launch, and the UI asks
+the user to review the refreshed selection. Null and non-current snapshots are
+also rejected. Duplicate clicks cannot queue more scans/copies; stale picker/session callbacks
 cannot start another copy. `ExportPickerTicket` binds each Activity result to a
 monotonically increasing per-Activity request code and one-shot session token;
 both survive saved-state recreation. An old picker result cannot be rebound to a
@@ -115,12 +119,13 @@ settings, permission start gates, service controls and capture source are unchan
 
 Author's final source check on 2026-10-09:
 
-- 288 export assertions covering multi-buffer copy, write/open/null/flush/close
+- 301 export assertions covering multi-buffer copy, write/open/null/flush/close
   failures, unreadable/revoked/zero-read/short/extra/corrupt targets, source changes
   before/during/after copy (including same-size changes with restored mtime),
   source metadata changes, traversal/link rejection, 103-object pagination,
   cancellation, duplicate/stale callbacks, request-code exhaustion and the
-  Activity-recreation/process-boundary state model.
+  Activity-recreation/process-boundary state model, plus current/stale/null/
+  unrecognized displayed-page selection.
 - Existing 7,068 policy assertions, 14 policy adversarial cases, 389 WAV/storage
   assertions, 11 storage adversarial cases, 58 app-run safety assertions and
   seven app-run adversarial cases pass.
@@ -143,6 +148,25 @@ Activity rotation/process death, local/cloud DocumentsProviders, install/update,
 GUI visual/accessibility usability, SDK API-29 device linkage, simultaneous
 recording/export under load, Xiaomi behavior, power loss and long-duration use.
 These must not be represented as passed by the host state-machine model tests.
+
+## Independent-review correction
+
+The initial candidate `1b8639e` passed 288 host assertions but independent review
+found an omitted multi-Activity race: only the spinner index reached the shared
+session, so another Activity's page change could substitute a different WAV.
+The correction binds selection to the actual displayed Page object, rejects a
+mismatch without changing the session, and obtains the Entry only from that
+validated snapshot. A regression uses the real first/next pages of the existing
+103-segment synthetic fixture; it confirms rejection of the stale first page and
+acceptance of the exact current-page Entry. Picker one-shot/ticket tests remain.
+
+The first correction-check attempt was stopped by a resource-observer race with
+an atomic synthetic-directory rename, not by a Java assertion. The observer now
+ignores only paths that disappeared while sampled. The incomplete generated
+fixture run was removed to stay within the correction's 4 MiB disk budget; prior
+successful fixtures and all production sources were retained. A complete retry
+passed 301 export assertions, all prior regressions, source wiring, buffer linkage
+and official-SDK source compilation. Raw local diagnostic/check logs are retained.
 
 ## Official API references
 

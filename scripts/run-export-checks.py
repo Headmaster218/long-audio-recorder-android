@@ -13,7 +13,11 @@ rss_limit = 256 * 1024**2
 out = root / 'app/build/export-checks'
 out.mkdir(parents=True, exist_ok=True)
 def size():
-    return root.stat().st_blocks * 512 + sum(p.lstat().st_blocks * 512 for p in root.rglob('*'))
+    total = root.stat().st_blocks * 512
+    for path in root.rglob('*'):
+        try: total += path.lstat().st_blocks * 512
+        except FileNotFoundError: pass  # Synthetic fixtures can be atomically renamed while sampled.
+    return total
 def guard():
     if shutil.disk_usage(root).free < floor: raise RuntimeError('Main-project 5 GiB disk floor reached')
     if size() > limit: raise RuntimeError('24 MiB feature-worktree budget reached')

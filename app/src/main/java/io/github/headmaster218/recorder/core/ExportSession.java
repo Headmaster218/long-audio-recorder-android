@@ -30,10 +30,13 @@ public final class ExportSession {
         state = new Snapshot(error == null ? Phase.IDLE : Phase.FAILED, token,
             error == null ? "Choose a completed segment. Audio is validated before export." : error, page, null, null);
     }
-    public synchronized String choose(int index) {
-        if (state.busy() || state.page == null || index < 0 || index >= state.page.entries.size()) return null;
+    public synchronized String choose(CommittedSegments.Page displayedPage, int index) {
+        // A second Activity can replace the global page before this Activity renders it.
+        // Never reinterpret a spinner index against a page other than the one actually displayed.
+        if (state.busy() || displayedPage == null || displayedPage != state.page
+                || index < 0 || index >= displayedPage.entries.size()) return null;
         String token = UUID.randomUUID().toString(); cancelled = false;
-        state = new Snapshot(Phase.CHOOSING, token, "Choose where to save in Android’s file picker.", state.page, state.page.entries.get(index), null); return token;
+        state = new Snapshot(Phase.CHOOSING, token, "Choose where to save in Android’s file picker.", displayedPage, displayedPage.entries.get(index), null); return token;
     }
     public synchronized CommittedSegments.Entry destination(String token) {
         if (!matches(token, Phase.CHOOSING)) return null;

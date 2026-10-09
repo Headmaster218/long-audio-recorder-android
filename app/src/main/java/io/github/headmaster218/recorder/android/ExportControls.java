@@ -59,8 +59,11 @@ final class ExportControls {
     }
     void saveState(Bundle out) { out.putInt("export-picker-code", ticket.code()); out.putString("export-picker-token", ticket.token()); }
     private void choose() {
-        localNotice = ""; String token = coordinator.choose(segments.getSelectedItemPosition());
-        if (token == null) { render(); return; }
+        localNotice = ""; String token = coordinator.choose(displayed, segments.getSelectedItemPosition());
+        if (token == null) {
+            if (displayed != coordinator.session.snapshot().page) localNotice = "The segment list changed. Review the refreshed selection before saving.\n";
+            render(); return;
+        }
         int requestCode = ticket.issue(token);
         if (requestCode < 0) { coordinator.pickerCancelled(token, "Picker request limit reached; close and reopen this screen."); render(); return; }
         CommittedSegments.Entry entry = coordinator.session.snapshot().entry;

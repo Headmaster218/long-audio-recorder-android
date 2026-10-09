@@ -2,7 +2,7 @@
   "status": "author checks passed; independent review and device acceptance pending",
   "baseline_local_commit": "6e190a4188fd50c4f4d638806b88f32ae910c67e",
   "version": "0.1.0-dev5",
-  "export_assertions": 288,
+  "export_assertions": 301,
   "regressions": {
     "core_assertions": 7068,
     "core_adversarial_cases": 14,
@@ -13,8 +13,8 @@
   },
   "cpu": 6,
   "nice": 19,
-  "sampled_peak_tree_rss_bytes": 132509696,
-  "current_worktree_disk_bytes": 14622720,
+  "sampled_peak_tree_rss_bytes": 136749056,
+  "current_worktree_disk_bytes": 18534400,
   "checks": [
     {
       "check": "android-source-compile",
@@ -47,5 +47,15 @@
     "upload or remote publication",
     "SMB/FTP",
     "source deletion or automatic retention"
-  ]
+  ],
+  "prior_candidate_export_assertions": 288,
+  "selection_fix": {
+    "baseline_candidate": "1b8639e130f90adb98b823679b29fe0132f51d85",
+    "issue": "Stale Activity spinner index could select a different WAV after shared-page replacement",
+    "guard": "Exact displayed Page identity checked before choosing Entry, journal or picker",
+    "regression": "103-segment first-to-next-page scenario; stale/null/unrecognized rejected, current exact Entry accepted",
+    "test_observer_recovery": "An initial resource-sampler FileNotFoundError during fixture atomic rename was fixed and the complete checks rerun",
+    "worktree_delta_bytes": 3907584,
+    "all_six_checks_passed": true
+  }
 }

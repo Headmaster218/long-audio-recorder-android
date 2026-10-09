@@ -150,7 +150,7 @@ public final class ExportTest {
         Fixture metadata = new Fixture(2); Files.write(metadata.root.resolve(metadata.entry.id).resolve("manifest.bin"), new byte[10]);
         eq(VerifiedExport.Status.FAILED, copy(metadata, new MemoryTarget()).status); metadata.retained();
     }
-    private static void allowlistAndPaging() throws Exception {
+    private static Path allowlistAndPaging() throws Exception {
         Fixture f = new Fixture(2); Path directory = f.root.resolve(f.entry.id);
         fails(() -> f.catalog.page("../outside.ready")); fails(() -> f.catalog.page(f.entry.id.replace(".ready", ".part")));
         Path parent = f.root.toAbsolutePath().getParent(); Path linked = parent.resolve("root-link-" + cases++);
@@ -173,6 +173,7 @@ public final class ExportTest {
         for (CommittedSegments.Entry e : page.entries) yes(ids.add(e.id)); eq(103, ids.size());
         eq(0, catalog.page(page.cursor()).entries.size());
         eq(0, new CommittedSegments(BASE.resolve("does-not-exist")).page(null).entries.size());
+        return many;
     }
     private static void cancellation() throws Exception {
         Fixture f = new Fixture(2); MemoryTarget untouched = new MemoryTarget();
@@ -194,19 +195,40 @@ public final class ExportTest {
     }
     private static void singleFlightAndRecreation() throws Exception {
         Fixture f = new Fixture(2); CommittedSegments.Page page = f.catalog.page(null); ExportSession state = new ExportSession();
-        yes(state.choose(0) == null); String listing = state.list(); yes(listing != null); yes(state.list() == null);
+        yes(state.choose(page, 0) == null); String listing = state.list(); yes(listing != null); yes(state.list() == null);
         state.listed("stale", page, null); eq(ExportSession.Phase.LISTING, state.snapshot().phase);
-        state.listed(listing, page, null); yes(state.choose(-1) == null); yes(state.choose(1) == null);
-        String choosing = state.choose(0); yes(state.choose(0) == null); yes(state.list() == null);
+        state.listed(listing, page, null); yes(state.choose(page, -1) == null); yes(state.choose(page, 1) == null);
+        String choosing = state.choose(page, 0); yes(state.choose(page, 0) == null); yes(state.list() == null);
         ExportSession recreatedControllerReference = state; eq(choosing, recreatedControllerReference.snapshot().token);
         yes(state.destination("stale") == null); state.pickerCancelled("stale", "stale"); eq(ExportSession.Phase.CHOOSING, state.snapshot().phase);
         state.pickerCancelled(choosing, "cancelled"); eq(ExportSession.Phase.CANCELLED, state.snapshot().phase); yes(state.destination(choosing) == null);
-        String retry = state.choose(0); yes(!retry.equals(choosing)); yes(state.destination(choosing) == null);
+        String retry = state.choose(page, 0); yes(!retry.equals(choosing)); yes(state.destination(choosing) == null);
         yes(recreatedControllerReference.destination(retry) == page.entries.get(0)); yes(state.destination(retry) == null);
-        yes(state.choose(0) == null); yes(state.list() == null); state.cancelCopy(); state.cancelCopy(); yes(state.cancelled(retry));
+        yes(state.choose(page, 0) == null); yes(state.list() == null); state.cancelCopy(); state.cancelCopy(); yes(state.cancelled(retry));
         VerifiedExport.Result result = copy(f, new MemoryTarget()); state.finished(choosing, result); eq(ExportSession.Phase.COPYING, state.snapshot().phase);
-        state.finished(retry, result); eq(ExportSession.Phase.VERIFIED, state.snapshot().phase); yes(state.choose(0) != null);
+        state.finished(retry, result); eq(ExportSession.Phase.VERIFIED, state.snapshot().phase); yes(state.choose(page, 0) != null);
         ExportSession newProcess = new ExportSession(); yes(newProcess.destination(retry) == null); eq(ExportSession.Phase.IDLE, newProcess.snapshot().phase);
+    }
+    private static void displayedSelectionBinding(Path root) throws Exception {
+        CommittedSegments catalog = new CommittedSegments(root);
+        CommittedSegments.Page displayedA = catalog.page(null);
+        CommittedSegments.Page displayedB = catalog.page(displayedA.cursor());
+        yes(displayedA.hasMore); eq(100, displayedA.entries.size());
+        yes(!displayedA.entries.get(0).id.equals(displayedB.entries.get(0).id));
+        ExportSession state = new ExportSession();
+        String first = state.list(); state.listed(first, displayedA, null);
+        String second = state.list(); state.listed(second, displayedB, null);
+        // Activity A still shows its first entry; Activity B has replaced the process-global page.
+        yes(state.choose(displayedA, 0) == null);
+        eq(ExportSession.Phase.IDLE, state.snapshot().phase); yes(state.snapshot().entry == null);
+        eq(second, state.snapshot().token); yes(state.choose(null, 0) == null);
+        // An equal-content refresh is still a different displayed snapshot and needs re-rendering.
+        CommittedSegments.Page unrenderedRefresh = catalog.page(displayedA.cursor());
+        yes(state.choose(unrenderedRefresh, 0) == null);
+        String selected = state.choose(displayedB, 0); yes(selected != null);
+        yes(state.snapshot().entry == displayedB.entries.get(0));
+        yes(state.destination(selected) == displayedB.entries.get(0));
+        yes(state.destination(selected) == null);
     }
     private static void pickerTickets() throws Exception {
         ExportPickerTicket original = new ExportPickerTicket();
@@ -222,7 +244,7 @@ public final class ExportTest {
         eq(-1, original.issue(null));
     }
     public static void main(String[] args) throws Exception {
-        happyAndBounded(); writeFailures(); readbackFailures(); sourceMutation(); allowlistAndPaging(); cancellation(); singleFlightAndRecreation(); pickerTickets();
+        happyAndBounded(); writeFailures(); readbackFailures(); sourceMutation(); Path pagingRoot = allowlistAndPaging(); cancellation(); singleFlightAndRecreation(); displayedSelectionBinding(pagingRoot); pickerTickets();
         System.out.println("PASS export: " + checks + " assertions across streaming, target failures, mutation, allowlist, pagination, cancellation and single-flight/recreation model cases");
         System.out.println("Host synthetic tests only. Android picker/grants/Activity/provider/process-death runtime remain untested.");
     }

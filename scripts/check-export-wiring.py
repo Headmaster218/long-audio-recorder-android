@@ -25,3 +25,7 @@ assert "No automatic retry" in ui
 assert "SegmentStore.Published" not in coordinator and "DeletionGate" not in all_export
 print("PASS export wiring: one-shot SAF document target, temporary grants, bounded worker, saved picker tickets, interruption marker and no deletion/retention handoff")
 print("Source inspection only; Android lifecycle, provider behavior, screen UI and permission grants remain untested.")
+assert "coordinator.choose(displayed, segments.getSelectedItemPosition())" in ui
+assert "session.choose(displayedPage, index)" in coordinator
+assert "displayedPage != state.page" in core
+print("PASS displayed-selection binding: UI page snapshot reaches the synchronized session identity guard")

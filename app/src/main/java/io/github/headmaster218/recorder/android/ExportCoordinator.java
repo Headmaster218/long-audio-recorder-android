@@ -50,8 +50,8 @@ final class ExportCoordinator {
             } catch (IOException | RuntimeException e) { session.listed(token, null, "Could not list completed segments (" + e.getClass().getSimpleName() + "). Originals retained."); }
         } });
     }
-    String choose(int index) {
-        String token = session.choose(index); if (token == null) return null;
+    String choose(CommittedSegments.Page displayedPage, int index) {
+        String token = session.choose(displayedPage, index); if (token == null) return null;
         // Marker is committed before handing control to another app. No audio or target URI is stored here.
         if (!journal.edit().putBoolean("in-flight", true).commit()) {
             session.pickerCancelled(token, "Could not save export interruption marker; export has not started."); return null;
