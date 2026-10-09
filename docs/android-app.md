@@ -13,10 +13,18 @@ background-start exemption, accessibility, phone-state, network, storage-wide,
 battery-exemption or manual wake-lock permission is requested. Notifications
 must remain permitted and the recording channel enabled by product policy.
 
-The persistent notification has Pause/Stop actions and opens the GUI. Activity
+The service requests an ongoing foreground notification with Pause/Stop actions
+and an entry point to the GUI. Android 14 may allow the user to dismiss it; a swipe
+alone does not stop recording and does not trigger a forced repost loop. The app
+controls and normal OS microphone/foreground-service controls remain available
+where supported. Notification permission/channel disabling and microphone
+permission loss still stop capture under the current product policy. Activity
 recreation never starts or stops capture. Pause closes the current AudioRecord
-run; an explicit Start resumes the capture with a new run/uncertain epoch and a
-new sequence. Stop ends the capture. Errors require explicit user action; a dead
+run; an explicit Start in that same process consumes a clean-pause token and resumes
+the capture with a new run/uncertain epoch and a new sequence. A new process has
+no token and always starts a fresh capture, regardless of stale paused/capture/
+epoch preferences. Cross-process resume is unsupported until there is a separately
+verified durable identity/recovery protocol. Stop ends the capture. Errors require explicit user action; a dead
 AudioRecord is not silently recreated. Android force-stop/process death cannot
 be made to run cleanup code; preserved local files remain the recovery source.
 
@@ -38,7 +46,14 @@ One AudioRecord stays alive across routine file rotation. Sixteen reusable
 2048-sample blocks form a bounded queue; the capture thread never waits for the
 filesystem. Queue exhaustion stops capture and marks an unknown gap. The writer
 thread drains accepted queued PCM through the reviewed spool. Storage failure
-preserves files and reports possible uncommitted RAM audio. Files are never
+preserves files. Production-used `PcmReadAccounting` counts every positive read
+before attribution/enqueue and acknowledges a block only after its complete writer
+append returns successfully. Final reconciliation occurs after the producer has
+stopped and includes held, queued and currently dequeued blocks. Their conservative
+difference is reported first in the bounded status message, even when the queue
+is empty. A failed append may have already staged a prefix, so this is an upper
+bound on unconfirmed samples, never an exact hardware-loss count or permission to
+replay. Counter overflow fails closed with an unknown-count warning. Files are never
 removed to make space. There is no export, upload or retention implementation.
 
 Recording/routing callbacks and actual configuration changes create uncertain
@@ -49,7 +64,10 @@ route leaving the requested built-in input likewise stops. Zero amplitude by
 itself is never used to infer Android silencing.
 
 Last status is a bounded SharedPreferences record, not a complete durable event
-journal. A stale active marker on a new process warns of an unclean previous run;
+journal. A clean-pause token is created only after successful in-process shutdown,
+consumed once on explicit resume and cleared on start/Stop/error. It is never
+serialized or reconstructed from preferences; clearing the disk paused flag is
+only cosmetic, not the safety fence. A stale active marker on a new process warns of an unclean previous run;
 it does not authorize automatic resume. Runtime error history, OS timestamps,
 precise overruns, export UI, headset selection and hardware acceptance are later
 work. SharedPreferences may be stale after abrupt termination; per-file reviewed
@@ -105,6 +123,7 @@ build has been claimed or tested.
 
 - [Microphone foreground-service requirements](https://developer.android.com/develop/background-work/services/fgs/service-types#microphone): manifest type and permission plus runtime microphone permission; microphone access is subject to while-in-use restrictions.
 - [Foreground-start restrictions](https://developer.android.com/develop/background-work/services/fgs/restrictions-bg-start): visible user flow is the baseline; arbitrary background starts are restricted.
+- [Android 14 ongoing-notification dismissal](https://developer.android.com/about/versions/14/behavior-changes-all): ongoing notifications can be dismissible; ordinary dismissal is not treated as explicit Stop or microphone consent revocation.
 - [Notification runtime permission](https://developer.android.com/develop/ui/compose/notifications/notification-permission): the app intentionally requires notification visibility even where Android can technically launch an FGS without that permission.
 - [AudioRecord reference](https://developer.android.com/reference/android/media/AudioRecord): short-array PCM16 reads, configured client format, recording/routing callbacks and explicit handling of dead objects; the PCM16 byte-array overload is deprecated.
 - [AudioRecordingConfiguration](https://developer.android.com/reference/android/media/AudioRecordingConfiguration): client format and physical device format may differ; policy silencing is exposed explicitly.
@@ -113,7 +132,7 @@ The minimal source does not implement every feature in architecture.md. Device
 input support, UI accessibility/layout, OEM lifecycle, thermal behavior, power,
 very large spool scaling and reliable all-day operation still need measurement.
 
-## Frozen candidate evidence
+## Original frozen candidate evidence, before review corrections
 
 Offline SDK build completed on 2026-10-09 with the installed official API 37.0
 android.jar and build-tools 37.0.0. The final unsigned artifact is
@@ -132,3 +151,27 @@ Regression execution/compilation took 5.34 seconds, sampled total RSS 104.54 MiB
 These tests do not execute Android services, Activity lifecycle, permission UI,
 AudioRecord, notifications, real audio routing or device filesystem behavior.
 Independent app review and those runtime acceptance tests remain required.
+
+## Narrow review corrections
+
+The original two app-review source traces remain in `android-app-review.md` and
+`scripts/reproduce-app-review-baseline.py`, against frozen commit 345bbf6. New
+production-used pure-Java helpers make process-scoped pause-token consumption and
+read-versus-append accounting directly testable without fake Android platform
+stubs. Run `sh scripts/test-app-safety.sh`. Those checks exercise helper contracts;
+they do not simulate actual process death, AudioRecord, notification dismissal,
+permissions or service lifecycle on Android.
+
+Corrective author checks passed 58 app-run safety helper assertions and all prior
+7,068 core / 14 policy adversarial / 389 storage / 11 storage adversarial checks.
+The helper/regression run took 5.48 seconds with sampled observer-plus-child RSS
+107.98 MiB. The preserved historical source-trace script still reproduces both
+original bugs against 345bbf6, as intended; it is not a test of the corrected app.
+
+The corrected unsigned SDK artifact is
+`app/build/direct-1791567111804337549/recorder-unsigned.apk`, SHA-256
+`d864989d28571ce3e8c5ea76f203c2d13b8fc1cbe45c6c34bdddde5c6624890a`.
+Explicit Android-bootclasspath javac, aapt2, D8, zipalign, packaged-manifest dumps
+and the targeted compiled-buffer linkage check passed. Sampled build RSS including
+the observer was 129.83 MiB. No signing, installation or Android runtime test
+occurred. Independent confirmation of the two corrections is still pending.

@@ -22,6 +22,7 @@ import io.github.headmaster218.recorder.core.CachePolicy;
 import io.github.headmaster218.recorder.core.CaptureTimeline;
 import io.github.headmaster218.recorder.core.DirectorySpool;
 import io.github.headmaster218.recorder.core.PcmSegmentWriter;
+import io.github.headmaster218.recorder.core.PcmReadAccounting;
 
 /** Two bounded workers: AudioRecord never waits for disk/network work. No automatic restart. */
 final class CaptureEngine implements Runnable {
@@ -49,6 +50,7 @@ final class CaptureEngine implements Runnable {
     private final ArrayBlockingQueue<Block> free = new ArrayBlockingQueue<Block>(BLOCKS);
     private final ArrayBlockingQueue<Block> ready = new ArrayBlockingQueue<Block>(BLOCKS);
     private final AtomicLong configurationEvents = new AtomicLong();
+    private final PcmReadAccounting accounting = new PcmReadAccounting();
     private volatile Stop stop = Stop.NONE;
     private volatile String failure;
     private volatile boolean producerDone;
@@ -90,6 +92,7 @@ final class CaptureEngine implements Runnable {
                     // Explicit little-endian serialization; no native-endian assumptions.
                     for (int i=0;i<block.count;i++) { short value = block.samples[i]; block.bytes[i*2] = (byte) value; block.bytes[i*2+1] = (byte) (value >>> 8); }
                     writer.append(block.bytes,0,block.count*2);
+                    if (!accounting.appendConfirmed(block.count)) throw new IOException("PCM acknowledgement counters overflowed");
                     RecorderState.writtenFrames += block.count / settings.channels;
                     RecorderState.route = current.route; previous = current;
                 } finally { block.snapshot = null; free.offer(block); }
@@ -98,8 +101,7 @@ final class CaptureEngine implements Runnable {
                 if (failure == null && stop == Stop.STOP) writer.stop(); else writer.interrupt();
             }
         } catch (Exception e) {
-            fail("Interrupted: " + e.getClass().getSimpleName() + ": " + e.getMessage()
-                + (ready.isEmpty() ? "" : "; queued RAM audio may be uncommitted."));
+            fail("Interrupted: " + e.getClass().getSimpleName() + ": " + e.getMessage());
         } finally {
             requestStop(Stop.INTERRUPTED);
             if (producer != null) {
@@ -110,10 +112,14 @@ final class CaptureEngine implements Runnable {
                 }
             } else if (record != null) record.release();
             if (spool != null) try { spool.close(); } catch (IOException e) { fail("Storage close failed; preserved files need inspection: " + e.getMessage()); }
+            PcmReadAccounting.Snapshot finalAccounting = accounting.snapshot();
+            if (finalAccounting.hasUnconfirmed() && failure == null) fail("Run ended with unconfirmed PCM; recovery inspection is required");
             boolean paused = failure == null && stop == Stop.PAUSE;
             String result = failure != null ? failure + " Local files are preserved; recording will not restart automatically."
                 : paused ? "Paused. Tap Start to resume with a new run and uncertain epoch."
                 : "Stopped. Local recordings are preserved. No upload or deletion occurred.";
+            // Keep the accounting warning first so bounded status persistence cannot truncate it away.
+            result = finalAccounting.warning() + result;
             completion.finished(this,result,paused,epochNumber == Long.MAX_VALUE ? epochNumber : epochNumber + 1);
         }
     }
@@ -172,6 +178,7 @@ final class CaptureEngine implements Runnable {
                     if (now - lastData > 2000) throw new IOException("No PCM frames received for two seconds; capture continuity unknown");
                     Thread.sleep(8); continue;
                 }
+                if (!accounting.readAccepted(count)) throw new IOException("PCM read counters overflowed; unconfirmed sample count is unknown");
                 lastData = now;
                 Snapshot snapshot = snapshot(recorder);
                 long after = configurationEvents.get();

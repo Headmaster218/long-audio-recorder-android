@@ -8,7 +8,6 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
 import android.os.Build;
@@ -16,6 +15,7 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import java.util.UUID;
+import io.github.headmaster218.recorder.core.CleanPauseGate;
 
 /** Explicit visible starts only. No boot receiver, sticky restart, background permission or upload work. */
 public final class RecordingService extends Service {
@@ -29,7 +29,7 @@ public final class RecordingService extends Service {
     @Override public void onCreate() {
         super.onCreate(); notifications = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         NotificationChannel channel = new NotificationChannel(CHANNEL,"Visible microphone recording",NotificationManager.IMPORTANCE_LOW);
-        channel.setDescription("Persistent recording controls and interruption notices"); notifications.createNotificationChannel(channel);
+        channel.setDescription("Recording notification controls and interruption notices"); notifications.createNotificationChannel(channel);
     }
     static boolean notificationsVisible(Context c) {
         if (Build.VERSION.SDK_INT >= 33 && c.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return false;
@@ -66,9 +66,9 @@ public final class RecordingService extends Service {
         try {
             RecordingSettings settings = RecordingSettings.from(intent);
             if (!permissionsReady(this)) throw new SecurityException("Microphone permission and visible notifications are required");
-            SharedPreferences p = RecorderState.prefs(this);
-            if (p.getBoolean("paused",false) && !p.getString("capture","").isEmpty()) {
-                capture = p.getString("capture",""); epoch = p.getLong("epoch",0); resume = true;
+            CleanPauseGate.Resume cleanPause = RecorderState.takeCleanPause();
+            if (cleanPause != null) {
+                capture = cleanPause.captureId; epoch = cleanPause.nextEpoch; resume = true;
                 if (epoch < 0 || epoch == Long.MAX_VALUE) throw new IllegalStateException("Resume epoch exhausted; tap Stop, then Start a new capture");
             }
             startForeground(NOTIFICATION,notification("Starting microphone; local recording only",true),ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);

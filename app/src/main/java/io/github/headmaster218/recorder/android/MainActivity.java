@@ -53,7 +53,8 @@ public final class MainActivity extends Activity {
         pause = button(column,"Pause",new View.OnClickListener() { @Override public void onClick(View v) { command(RecordingService.PAUSE); } });
         stop = button(column,"Stop",new View.OnClickListener() { @Override public void onClick(View v) { command(RecordingService.STOP); } });
         status = text(column,"Idle",16);
-        text(column,"Pause ends this AudioRecord run. Resume is a new run and uncertain epoch in the same capture. Stop ends the capture. App recreation never restarts recording. Files remain app-private until a reviewed export/transfer feature exists.",14);
+        text(column,"Pause ends this AudioRecord run. Resume within the same process uses a new run and uncertain epoch. After process restart, Start creates a fresh capture. Stop ends the capture. App recreation never restarts recording. Files remain app-private until a reviewed export/transfer feature exists.",14);
+        text(column,"Android may let you dismiss the ongoing notification. A swipe alone does not stop recording or trigger forced reposts. Reopen this app for Stop/Pause; Android microphone/active-app controls remain available where supported.",14);
     }
     private TextView text(LinearLayout parent,String value,int size) { TextView t = new TextView(this); t.setText(value); t.setTextSize(size); t.setPadding(0,10,0,10); parent.addView(t); return t; }
     private EditText number(LinearLayout p,String label,String value,int id) {
