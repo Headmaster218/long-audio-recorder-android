@@ -6,6 +6,8 @@ import io.github.headmaster218.recorder.core.CaptureTimeline.Epoch;
 import io.github.headmaster218.recorder.core.CaptureTimeline.Gap;
 import io.github.headmaster218.recorder.core.CaptureTimeline.SegmentManifest;
 import io.github.headmaster218.recorder.core.DeletionGate.Receipt;
+import io.github.headmaster218.recorder.core.DeletionGate.ObjectBinding;
+import io.github.headmaster218.recorder.core.DeletionGate.Guard;
 import io.github.headmaster218.recorder.core.DeletionGate.State;
 import io.github.headmaster218.recorder.core.DeletionGate.Verification;
 import io.github.headmaster218.recorder.core.TransferPolicy.Block;
@@ -23,7 +25,9 @@ public final class CoreTest {
     private static void fails(Action action) { checks++; try { action.run(); } catch (IllegalArgumentException e) { return; } catch (IllegalStateException e) { return; } throw new AssertionError("expected rejection at " + checks); }
     private static Epoch epoch(String run, long n, PcmFormat format, Gap gap, String route) { return new Epoch("capture", run, n, format, "phone", route, gap); }
     private static CaptureTimeline timeline(long target) { return new CaptureTimeline(epoch("run", 0, PcmFormat.DEFAULT, Gap.START, "phone"), target, 0); }
-    private static Receipt receipt(String hash) { return new Receipt("capture/0", "nas-A", "payload.pcm", "manifest.json", "committed.json", 100, hash, B, C); }
+    private static ObjectBinding binding() { return new ObjectBinding("local-object-0", "local-generation-1", "remote-payload-1", "remote-metadata-1", "remote-commit-1"); }
+    private static Guard guard() { return new Guard(receipt(A), "fenced-operation-1"); }
+    private static Receipt receipt(String hash) { return new Receipt("capture/0", "nas-A", "payload.pcm", "manifest.json", "committed.json", 100, hash, B, C, binding()); }
     private static DeletionGate verified(boolean deletion, boolean strict, boolean durable) {
         DeletionGate g = new DeletionGate(receipt(A), deletion, strict); g.beginUpload();
         g.payloadVerified(100, A, Verification.AUTHENTICATED_FULL_READBACK);
@@ -126,6 +130,20 @@ public final class CoreTest {
         eq(Block.AMBIGUOUS_ROUTE, flexible.evaluate(100, 0, false, false, false, new Network(true, false, false, false, false, false)));
         TransferPolicy noCell = new TransferPolicy(false, false, false, true, false, 1, -1);
         eq(Block.CELLULAR_DISABLED, noCell.evaluate(1, 0, false, false, false, cell));
+        TransferPolicy all = new TransferPolicy(true, true, false, false, false, 100, 1000,
+            TransferPolicy.AutomaticTriggers.ALL);
+        for (int bits = 0; bits < 16; bits++) {
+            Block got = all.evaluate((bits & 1) != 0 ? 100 : 1, (bits & 2) != 0 ? 1000 : 0,
+                (bits & 4) != 0, (bits & 8) != 0, true, wifi);
+            boolean triggered = (bits & 3) == 3 || (bits & 12) != 0;
+            eq(triggered ? Block.NONE : Block.NOT_TRIGGERED, got);
+        }
+        eq(Block.NOT_CHARGING, all.evaluate(1, 0, false, true, false, wifi));
+        eq(Block.METERED_DISABLED, all.evaluate(1, 0, true, false, true, metered));
+        TransferPolicy noAge = new TransferPolicy(false, true, false, false, false, 100, -1,
+            TransferPolicy.AutomaticTriggers.ALL);
+        eq(Block.NONE, noAge.evaluate(100, 0, false, false, true, wifi));
+        eq(Block.NOT_TRIGGERED, noAge.evaluate(99, 1000000, false, false, true, wifi));
         fails(() -> p.evaluate(-1, 0, false, false, true, wifi));
         fails(() -> new TransferPolicy(false, false, true, true, true, 0, -1));
     }
@@ -155,41 +173,73 @@ public final class CoreTest {
         QuotaLedger.Reservation huge = exact.reserve(Long.MAX_VALUE); eq(0, exact.availableBytes());
         yes(exact.recordBytes(huge, Long.MAX_VALUE)); exact.finish(huge); eq(Long.MAX_VALUE, exact.snapshot().dailyCharged);
         eq(0, new QuotaLedger(10, 20, 0, 0, 11, 11).availableBytes());
+        QuotaLedger pendingOverflow = new QuotaLedger(Long.MAX_VALUE, Long.MAX_VALUE, 0, 0, 0, 0);
+        QuotaLedger.Reservation tiny = pendingOverflow.reserve(10);
+        yes(pendingOverflow.reserve(Long.MAX_VALUE - 10) != null);
+        yes(!pendingOverflow.recordBytes(tiny, 11));
+        eq(Long.MAX_VALUE, pendingOverflow.snapshot().dailyCharged);
+        eq(Long.MAX_VALUE, pendingOverflow.snapshot().monthlyCharged); eq(0, pendingOverflow.availableBytes());
+        QuotaLedger spentOverflow = new QuotaLedger(Long.MAX_VALUE, Long.MAX_VALUE, 0, 0,
+            Long.MAX_VALUE - 100, Long.MAX_VALUE - 100);
+        QuotaLedger.Reservation small = spentOverflow.reserve(10);
+        yes(!spentOverflow.recordBytes(small, 101)); eq(0, spentOverflow.availableBytes());
+        spentOverflow.finish(small); eq(Long.MAX_VALUE, spentOverflow.snapshot().dailyCharged);
+        yes(spentOverflow.reserve(1) == null);
     }
     private static void deletion() {
         DeletionGate g = new DeletionGate(receipt(A), true, true);
-        eq(State.READY, g.state()); fails(() -> g.localDeletionAcknowledged());
+        Guard operation = guard();
+        eq(State.READY, g.state()); fails(() -> g.localDeletionAcknowledged(operation));
         fails(() -> g.payloadVerified(100, A, Verification.TRUSTED_SERVER_SHA256));
         g.beginUpload(); fails(() -> g.payloadVerified(99, A, Verification.TRUSTED_SERVER_SHA256));
         fails(() -> g.payloadVerified(100, B, Verification.TRUSTED_SERVER_SHA256)); // Same size, wrong bytes.
         fails(() -> g.payloadVerified(100, A, null)); eq(State.UPLOADING, g.state());
         g.uploadFailed(); eq(State.READY, g.state()); g.beginUpload();
         g.payloadVerified(100, A, Verification.AUTHENTICATED_FULL_READBACK);
-        fails(() -> g.localDeletionAcknowledged());
+        fails(() -> g.localDeletionAcknowledged(operation));
         fails(() -> g.committed(receipt(B), Verification.TRUSTED_SERVER_SHA256, true));
         g.committed(receipt(A), Verification.TRUSTED_SERVER_SHA256, true);
-        yes(!g.finalObjectsRechecked(receipt(A), Verification.TRUSTED_SERVER_SHA256));
-        fails(() -> g.receiptPersisted(receipt(B))); fails(() -> g.localDeletionAcknowledged());
-        g.receiptPersisted(receipt(A)); yes(!g.finalObjectsRechecked(receipt(B), Verification.TRUSTED_SERVER_SHA256));
-        yes(g.finalObjectsRechecked(receipt(A), Verification.AUTHENTICATED_FULL_READBACK));
+        yes(!g.finalObjectsRechecked(receipt(A), Verification.TRUSTED_SERVER_SHA256, operation));
+        fails(() -> g.receiptPersisted(receipt(B))); fails(() -> g.localDeletionAcknowledged(operation));
+        g.receiptPersisted(receipt(A)); yes(!g.finalObjectsRechecked(receipt(B), Verification.TRUSTED_SERVER_SHA256, operation));
+        yes(g.finalObjectsRechecked(receipt(A), Verification.AUTHENTICATED_FULL_READBACK, operation));
         eq(State.LOCAL_DELETE_ELIGIBLE, g.state());
-        yes(!g.finalObjectsRechecked(null, Verification.TRUSTED_SERVER_SHA256));
-        eq(State.REMOTE_COMMITTED, g.state()); fails(() -> g.localDeletionAcknowledged());
-        yes(g.finalObjectsRechecked(receipt(A), Verification.TRUSTED_SERVER_SHA256));
-        g.localDeletionAcknowledged(); eq(State.LOCAL_DELETED, g.state()); fails(() -> g.beginUpload());
+        yes(!g.finalObjectsRechecked(null, Verification.TRUSTED_SERVER_SHA256, operation));
+        eq(State.REMOTE_COMMITTED, g.state()); fails(() -> g.localDeletionAcknowledged(operation));
+        yes(g.finalObjectsRechecked(receipt(A), Verification.TRUSTED_SERVER_SHA256, operation));
+        fails(() -> g.localDeletionAcknowledged(guard()));
+        g.localDeletionAcknowledged(operation); yes(!operation.isActive()); eq(State.LOCAL_DELETED, g.state()); fails(() -> g.beginUpload());
         DeletionGate strict = verified(true, true, false); strict.receiptPersisted(receipt(A));
-        yes(!strict.finalObjectsRechecked(receipt(A), Verification.TRUSTED_SERVER_SHA256));
+        yes(!strict.finalObjectsRechecked(receipt(A), Verification.TRUSTED_SERVER_SHA256, guard()));
         DeletionGate retain = verified(false, false, true); retain.receiptPersisted(receipt(A));
-        yes(!retain.finalObjectsRechecked(receipt(A), Verification.TRUSTED_SERVER_SHA256));
+        yes(!retain.finalObjectsRechecked(receipt(A), Verification.TRUSTED_SERVER_SHA256, guard()));
         DeletionGate contentOnly = verified(true, false, false); contentOnly.receiptPersisted(receipt(A));
-        yes(contentOnly.finalObjectsRechecked(receipt(A), Verification.TRUSTED_SERVER_SHA256));
-        Receipt otherDestination = new Receipt("capture/0", "nas-B", "payload.pcm", "manifest.json", "committed.json", 100, A, B, C);
+        yes(contentOnly.finalObjectsRechecked(receipt(A), Verification.TRUSTED_SERVER_SHA256, guard()));
+        Receipt otherDestination = new Receipt("capture/0", "nas-B", "payload.pcm", "manifest.json", "committed.json", 100, A, B, C, binding());
         DeletionGate binding = verified(true, false, true); fails(() -> binding.receiptPersisted(otherDestination));
-        fails(() -> new Receipt("capture/0", "nas-A", "same", "same", "marker", 100, A, B, C));
-        fails(() -> new Receipt("capture/0", "nas-A", "payload", "metadata", "marker", 0, A, B, C));
+        fails(() -> new Receipt("capture/0", "nas-A", "same", "same", "marker", 100, A, B, C, binding()));
+        fails(() -> new Receipt("capture/0", "nas-A", "payload", "metadata", "marker", 0, A, B, C, binding()));
+        DeletionGate guarded = verified(true, true, true); guarded.receiptPersisted(receipt(A));
+        Guard held = guard();
+        yes(!guarded.finalObjectsRechecked(receipt(A), Verification.TRUSTED_SERVER_SHA256, new Guard(otherDestination, "wrong-destination-operation")));
+        yes(!guarded.finalObjectsRechecked(receipt(A), Verification.TRUSTED_SERVER_SHA256, null));
+        ObjectBinding stale = new ObjectBinding("replacement", "local-generation-1", "remote-payload-1", "remote-metadata-1", "remote-commit-1");
+        yes(!guarded.finalObjectsRechecked(receipt(A), Verification.TRUSTED_SERVER_SHA256, new Guard(new Receipt("capture/0", "nas-A", "payload.pcm", "manifest.json", "committed.json", 100, A, B, C, stale), "op")));
+        yes(guarded.finalObjectsRechecked(receipt(A), Verification.TRUSTED_SERVER_SHA256, held));
+        held.invalidate(); eq(State.REMOTE_COMMITTED, guarded.state());
+        fails(() -> guarded.localDeletionAcknowledged(held));
+        yes(!guarded.finalObjectsRechecked(receipt(A), Verification.TRUSTED_SERVER_SHA256, held));
+        for (int i = 0; i < 5; i++) {
+            String[] versions = {"local-object-0", "local-generation-1", "remote-payload-1", "remote-metadata-1", "remote-commit-1"};
+            versions[i] = "substituted";
+            ObjectBinding wrong = new ObjectBinding(versions[0], versions[1], versions[2], versions[3], versions[4]);
+            Receipt changed = new Receipt("capture/0", "nas-A", "payload.pcm", "manifest.json", "committed.json", 100, A, B, C, wrong);
+            yes(!guarded.finalObjectsRechecked(changed, Verification.TRUSTED_SERVER_SHA256, guard()));
+            fails(() -> guarded.receiptPersisted(changed));
+        }
         // Fresh process defaults to retain; it cannot infer persisted receipt or remote success.
         DeletionGate crash = new DeletionGate(receipt(A), true, true);
-        fails(() -> crash.localDeletionAcknowledged());
+        fails(() -> crash.localDeletionAcknowledged(operation));
     }
     public static void main(String[] args) {
         formats(); capture(); cache(); policy(); quota(); deletion();

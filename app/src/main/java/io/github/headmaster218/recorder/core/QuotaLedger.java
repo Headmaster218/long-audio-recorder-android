@@ -44,8 +44,8 @@ public final class QuotaLedger {
     public boolean recordBytes(Reservation r, long actualBytes) {
         requireActive(r);
         if (actualBytes < 0) throw new IllegalArgumentException();
-        long nextDaily = Checks.add(dailySpent, actualBytes);
-        long nextMonthly = Checks.add(monthlySpent, actualBytes);
+        long nextDaily = saturatingAdd(dailySpent, actualBytes);
+        long nextMonthly = saturatingAdd(monthlySpent, actualBytes);
         boolean withinReservation = actualBytes <= r.remaining;
         long consumed = Math.min(actualBytes, r.remaining);
         r.remaining -= consumed; reserved -= consumed;
@@ -56,12 +56,16 @@ public final class QuotaLedger {
     public void finish(Reservation r) {
         requireActive(r); reserved -= r.remaining; r.remaining = 0; active.remove(r);
     }
+    // Observed traffic cannot be rejected without accounting for it. Saturation is persistably exhausted.
+    private static long saturatingAdd(long a, long b) {
+        return a > Long.MAX_VALUE - b ? Long.MAX_VALUE : a + b;
+    }
     private void requireActive(Reservation r) {
         if (r == null || !active.contains(r)) throw new IllegalStateException("foreign or finished reservation");
     }
     /** Crash recovery charges all outstanding reservations conservatively; never refunds unknown traffic. */
     public Snapshot snapshot() {
-        return new Snapshot(day, month, Checks.add(dailySpent, reserved), Checks.add(monthlySpent, reserved));
+        return new Snapshot(day, month, saturatingAdd(dailySpent, reserved), saturatingAdd(monthlySpent, reserved));
     }
     /** Caller resolves configured timezone/calendar. Reject backward clocks and in-flight resets. */
     public void advanceWindow(long nextDay, long nextMonth) {
