@@ -113,7 +113,9 @@ unexpected overrun `recordBytes()` still charges observed bytes and returns
 false; stop and reconcile all active transfers immediately. No further packet
 is authorized by that return value. Observed cumulative traffic or snapshot sums
 that exceed `Long.MAX_VALUE` saturate to that persistable exhausted value, rather
-than throwing and leaving budget available. This deliberately sacrifices an
+than throwing and leaving budget available. `recordBytes()` also returns false
+whenever either cumulative addition overflows, including reconciliation of a
+previously reserved in-flight attempt. This deliberately sacrifices an
 unrepresentable exact total to retain a fail-closed budget. Reservations must
 bound traffic before it
 is emitted, not retroactively. This is an application budget, not a guarantee

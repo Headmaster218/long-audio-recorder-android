@@ -185,6 +185,16 @@ public final class CoreTest {
         yes(!spentOverflow.recordBytes(small, 101)); eq(0, spentOverflow.availableBytes());
         spentOverflow.finish(small); eq(Long.MAX_VALUE, spentOverflow.snapshot().dailyCharged);
         yes(spentOverflow.reserve(1) == null);
+        QuotaLedger inFlight = new QuotaLedger(Long.MAX_VALUE, Long.MAX_VALUE, 0, 0, 0, 0);
+        QuotaLedger.Reservation firstAttempt = inFlight.reserve(1);
+        QuotaLedger.Reservation alreadyInFlight = inFlight.reserve(Long.MAX_VALUE - 1);
+        yes(!inFlight.recordBytes(firstAttempt, 2));
+        // Reconciliation of another reserved attempt must not report success after cumulative overflow.
+        yes(!inFlight.recordBytes(alreadyInFlight, Long.MAX_VALUE - 1));
+        eq(0, inFlight.availableBytes()); eq(Long.MAX_VALUE, inFlight.snapshot().dailyCharged);
+        eq(Long.MAX_VALUE, inFlight.snapshot().monthlyCharged);
+        inFlight.finish(firstAttempt); inFlight.finish(alreadyInFlight);
+        yes(inFlight.reserve(1) == null);
     }
     private static void deletion() {
         DeletionGate g = new DeletionGate(receipt(A), true, true);

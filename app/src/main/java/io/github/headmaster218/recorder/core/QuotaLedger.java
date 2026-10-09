@@ -44,13 +44,16 @@ public final class QuotaLedger {
     public boolean recordBytes(Reservation r, long actualBytes) {
         requireActive(r);
         if (actualBytes < 0) throw new IllegalArgumentException();
+        boolean withinCounterRange = dailySpent <= Long.MAX_VALUE - actualBytes
+            && monthlySpent <= Long.MAX_VALUE - actualBytes;
         long nextDaily = saturatingAdd(dailySpent, actualBytes);
         long nextMonthly = saturatingAdd(monthlySpent, actualBytes);
         boolean withinReservation = actualBytes <= r.remaining;
         long consumed = Math.min(actualBytes, r.remaining);
         r.remaining -= consumed; reserved -= consumed;
         dailySpent = nextDaily; monthlySpent = nextMonthly;
-        return withinReservation && dailySpent <= dailyLimit && monthlySpent <= monthlyLimit;
+        return withinCounterRange && withinReservation
+            && dailySpent <= dailyLimit && monthlySpent <= monthlyLimit;
     }
     /** Failed transfers still keep actual bytes charged; only unused reserved bytes are released. */
     public void finish(Reservation r) {
