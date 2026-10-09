@@ -1,15 +1,15 @@
 # Android recorder
 
-Version: **0.1.0-dev3** (WAV/storage development seed).
+Version: **0.1.0-dev4-source** (unsigned Android app candidate).
 
-Research, design and Java policy/storage core for a user-visible, long-running Android recorder.
+Native Android app source with a reviewed Java policy/storage core for a visible recorder.
 First device of interest: Xiaomi Mix Fold 4. Generic Android APIs come first;
 device-specific workarounds require measured evidence on the actual device.
 
-**Status: Java policy/metadata core, bounded WAV writer and local spool,
-with deterministic JVM and synthetic local-filesystem tests, 2026-10-09.
-No APK, Android application implementation, SDK, Gradle wrapper, downloaded
-dependencies, Android build, or device validation.**
+**Status: native Android Activity/microphone service source and an unsigned SDK-built APK,
+2026-10-09. Core/storage JVM regressions pass. The app remains unsigned, uninstalled,
+not device-tested and pending independent app review. No Gradle/runtime dependency
+or signing key was downloaded.**
 This is an independent Git repository for the Android recorder project.
 Public project: [long-audio-recorder-android](https://github.com/Headmaster218/long-audio-recorder-android).
 
@@ -48,3 +48,11 @@ storage adversarial cases and a targeted Java-8 buffer-linkage check. Run
 These results do not establish full Java-8/Android compatibility, actual
 power-loss/process-death durability, sustained performance or 24-hour capture.
 No Android recording implementation, upload adapter or deletion adapter is included.
+
+## Android app candidate
+
+The new [native app/service slice](docs/android-app.md) adds a visible microphone
+foreground service, bounded capture queue, local WAV spool, runtime permission
+flow and basic configuration UI. An offline unsigned APK build is available for
+static inspection. It is not signed, installed or device-tested; independent
+app review is still required. No signing key or dependency was downloaded.

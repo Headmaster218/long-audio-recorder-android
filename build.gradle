@@ -1,0 +1,8 @@
+// Optional Gradle entry point; the local direct-SDK script is the no-download build path.
+// No AGP/Gradle version or wrapper is fetched automatically in this development slice.
+buildscript {
+    def selected = project.findProperty('agpVersion')
+    if (selected == null) throw new GradleException('Set -PagpVersion to an installed, API-37-compatible Android Gradle Plugin version. See docs/android-app.md; use the direct SDK build for offline verification.')
+    repositories { google(); mavenCentral() }
+    dependencies { classpath "com.android.tools.build:gradle:${selected}" }
+}

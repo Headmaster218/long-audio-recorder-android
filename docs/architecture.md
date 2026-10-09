@@ -1,8 +1,8 @@
 # Proposed architecture
 
 Design proposal; a first pure Java policy/metadata slice is now implemented
-([contract and limits](policy-core.md)). Android components remain unimplemented
-and nothing is hardware-validated. See research.md for
+([contract and limits](policy-core.md)). A minimal native [Android app candidate](android-app.md) now exists; the wider
+Android/transfer architecture remains incomplete and nothing is hardware-validated. See research.md for
 platform evidence. SDK/dependency versions must be selected and checked when
 implementation is authorized; documentation may include newer/preview APIs.
 

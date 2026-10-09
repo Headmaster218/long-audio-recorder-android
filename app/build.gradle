@@ -1,0 +1,15 @@
+apply plugin: 'com.android.application'
+android {
+    namespace 'io.github.headmaster218.recorder.android'
+    compileSdk 37
+    defaultConfig {
+        applicationId 'io.github.headmaster218.recorder.android'
+        minSdk 29
+        targetSdk 37
+        versionCode 4
+        versionName '0.1.0-dev4-source'
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_1_8; targetCompatibility JavaVersion.VERSION_1_8 }
+    buildTypes { release { minifyEnabled false } }
+}
+// No AndroidX, transport, analytics, or external runtime dependencies.

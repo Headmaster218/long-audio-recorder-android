@@ -1,0 +1,134 @@
+# Visible Android recorder source slice
+
+Candidate 0.1.0-dev4-source. This adds actual Android app/service source above the
+reviewed dev3 JVM policy and storage layers. It is not signed, installed, run on
+a device, or verified for 24-hour capture, screen-off behavior or battery use.
+
+## Behavior and boundaries
+
+Native Activity and microphone foreground service; minimum Android 10/API 29,
+compile/target API 37. A visible Start press gates microphone and notification
+permissions before starting the service. No boot receiver, sticky restart,
+background-start exemption, accessibility, phone-state, network, storage-wide,
+battery-exemption or manual wake-lock permission is requested. Notifications
+must remain permitted and the recording channel enabled by product policy.
+
+The persistent notification has Pause/Stop actions and opens the GUI. Activity
+recreation never starts or stops capture. Pause closes the current AudioRecord
+run; an explicit Start resumes the capture with a new run/uncertain epoch and a
+new sequence. Stop ends the capture. Errors require explicit user action; a dead
+AudioRecord is not silently recreated. Android force-stop/process death cannot
+be made to run cleanup code; preserved local files remain the recovery source.
+
+The GUI configures client sample rate, mono/stereo, exact segment seconds and
+logical spool maximum. Defaults are 16 kHz mono PCM16, five minutes, 512 MiB
+spool, and a fixed 32 MiB free-space reserve. Settings must fit a complete segment
+and metadata. AudioRecord must accept the exact requested client format.
+
+This slice requests the built-in phone microphone only. Preferred-route success
+is not treated as proof: active device and recording configuration are inspected
+on reads. Physical device format and client PCM format are recorded separately
+in each epoch's bounded actual-input descriptor. Android may convert between
+them; no physical 16-kHz recording guarantee is claimed. Unknown configuration
+or a client-format mismatch stops visibly. One just-read, unattributable RAM
+buffer may be uncommitted; this is reported, not labeled continuous recording.
+
+Capture uses PCM16 short-array reads, explicitly converted to little-endian bytes.
+One AudioRecord stays alive across routine file rotation. Sixteen reusable
+2048-sample blocks form a bounded queue; the capture thread never waits for the
+filesystem. Queue exhaustion stops capture and marks an unknown gap. The writer
+thread drains accepted queued PCM through the reviewed spool. Storage failure
+preserves files and reports possible uncommitted RAM audio. Files are never
+removed to make space. There is no export, upload or retention implementation.
+
+Recording/routing callbacks and actual configuration changes create uncertain
+route/format epochs. Callback/read observation cannot identify the exact sample
+of an asynchronous hardware transition; descriptors say so explicitly. A known
+policy-silenced block is marked, preserved and followed by interruption. Actual
+route leaving the requested built-in input likewise stops. Zero amplitude by
+itself is never used to infer Android silencing.
+
+Last status is a bounded SharedPreferences record, not a complete durable event
+journal. A stale active marker on a new process warns of an unclean previous run;
+it does not authorize automatic resume. Runtime error history, OS timestamps,
+precise overruns, export UI, headset selection and hardware acceptance are later
+work. SharedPreferences may be stale after abrupt termination; per-file reviewed
+metadata and staged bytes remain authoritative. App-private storage is not an
+encryption claim. Automatic backup is disabled in the manifest.
+
+## Android persistence adapter
+
+Directory sync uses public android.system.Os open/fstat/fsync/close APIs. The
+SDK does not expose O_DIRECTORY, so an opened no-follow descriptor is checked
+with fstat/S_ISDIR before forcing it. Atomic publication uses the reviewed
+private-directory NIO adapter. Every unsupported/failed operation blocks ready
+publication. SDK compilation does not prove any real filesystem's power-loss
+behavior, directory forcing, locking or atomic-rename implementation.
+
+## Offline Linux build, intentionally unsigned
+
+The standard app/src/main tree, AndroidManifest.xml, resources and Gradle module
+are present. No Gradle wrapper, plugin or dependency was downloaded. Optional
+Gradle use requires an explicitly supplied installed API-37-compatible AGP
+version via -PagpVersion; that path is unverified and may require downloads if
+the caller has not provisioned it. Do not run it under a no-download instruction.
+
+The verified local-build path uses the installed official SDK directly:
+
+    python3 scripts/build-android-unsigned.py --sdk /path/to/android-sdk-minimal --deadline-utc <explicit-UTC-deadline>
+
+Run under the authorized CPU/nice limits. The script guards 256 MiB sampled
+process-tree RSS, 24 MiB generated disk, 2 GiB host available memory and the main
+project's 5 GiB free-disk floor plus 1.125 GiB reservation. It also enforces its
+explicit pause deadline and a 90-second per-command bound. No signing key,
+keystore, password, network access, device connection or APK installation occurs.
+
+Pipeline: aapt2 resource compile/link; javac with the SDK android.jar explicitly
+as bootclasspath and Java-8 classfile target; installed D8 with that Android
+library and minimum API 29; APK assembly; zipalign and packaged-manifest dumps.
+Production Android code uses anonymous callbacks because the SDK bootclasspath
+does not provide javac's LambdaMetafactory bootstrap. No host-JDK fallback or
+fake platform stub was added to bypass that failure.
+
+The output is UNSIGNED and cannot be installed as-is. Signing, package validation,
+independent source review, runtime permissions/lifecycle tests and real-device
+checks remain gates. Core/storage JVM scripts now select only the core source
+package so they do not accidentally compile Android APIs against a host JDK.
+
+Windows intent: keep Java/native Android source and the Gradle layout portable;
+a future Windows entry point must locate the equivalent official Windows SDK
+tools, use proper classpath separators/quoting and implement equivalent resource
+and disk guards. The current guarded Python driver is Linux-only. No Windows
+build has been claimed or tested.
+
+## Primary documentation checked 2026-10-09
+
+- [Microphone foreground-service requirements](https://developer.android.com/develop/background-work/services/fgs/service-types#microphone): manifest type and permission plus runtime microphone permission; microphone access is subject to while-in-use restrictions.
+- [Foreground-start restrictions](https://developer.android.com/develop/background-work/services/fgs/restrictions-bg-start): visible user flow is the baseline; arbitrary background starts are restricted.
+- [Notification runtime permission](https://developer.android.com/develop/ui/compose/notifications/notification-permission): the app intentionally requires notification visibility even where Android can technically launch an FGS without that permission.
+- [AudioRecord reference](https://developer.android.com/reference/android/media/AudioRecord): short-array PCM16 reads, configured client format, recording/routing callbacks and explicit handling of dead objects; the PCM16 byte-array overload is deprecated.
+- [AudioRecordingConfiguration](https://developer.android.com/reference/android/media/AudioRecordingConfiguration): client format and physical device format may differ; policy silencing is exposed explicitly.
+
+The minimal source does not implement every feature in architecture.md. Device
+input support, UI accessibility/layout, OEM lifecycle, thermal behavior, power,
+very large spool scaling and reliable all-day operation still need measurement.
+
+## Frozen candidate evidence
+
+Offline SDK build completed on 2026-10-09 with the installed official API 37.0
+android.jar and build-tools 37.0.0. The final unsigned artifact is
+`app/build/direct-1791565691715649576/recorder-unsigned.apk` (ignored build output).
+SHA-256: `5e529ac980526a08354f97e0d09a610a127518cbd0a5593a80d3e3ea6522bdde`.
+The same directory contains packaged badging, manifest tree, zip alignment and
+resource/R/class/dex evidence. Manifest inspection reports minimum API 29,
+target API 37, a non-exported microphone service, exported launcher Activity,
+exactly microphone/notification/foreground-service permissions and no network
+permission. The unsigned build's sampled observer-plus-child peak was 136.14 MiB.
+
+The unchanged core/storage regressions passed: 7,068 core assertions, 14 policy
+adversarial cases, 389 storage assertions and 11 storage adversarial cases. The
+targeted NIO Java-8 linkage check passed on the Android-bootclasspath classfiles.
+Regression execution/compilation took 5.34 seconds, sampled total RSS 104.54 MiB.
+These tests do not execute Android services, Activity lifecycle, permission UI,
+AudioRecord, notifications, real audio routing or device filesystem behavior.
+Independent app review and those runtime acceptance tests remain required.
