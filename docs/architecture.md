@@ -1,6 +1,8 @@
 # Proposed architecture
 
-Design proposal, not implemented or hardware-validated. See research.md for
+Design proposal; a first pure Java policy/metadata slice is now implemented
+([contract and limits](policy-core.md)). Android components remain unimplemented
+and nothing is hardware-validated. See research.md for
 platform evidence. SDK/dependency versions must be selected and checked when
 implementation is authorized; documentation may include newer/preview APIs.
 
@@ -237,7 +239,10 @@ claim. Fold/unfold and activity recreation must not restart the service.
 5. Add remaining adapters and headset policies after capability tests. Then
    run extended screen-off/power measurements and optional FLAC comparisons.
 
-No SDK or dependencies were fetched and none of these tests ran in this pass.
+The initial design pass fetched no SDK or dependencies and ran no tests. The
+subsequent Java-only policy-core pass adds deterministic JVM tests; see
+[policy-core.md](policy-core.md). Android/device/transport acceptance gates above
+remain unimplemented and untested.
 Next decisions can wait for implementation: actual phone Android/HyperOS
 version, headset profiles, chosen NAS/server capabilities, cache size, quota,
 and desired transport. No user question is needed for this research seed.
