@@ -1,9 +1,15 @@
 # Manual verified SAF export source candidate
 
-Version 0.1.0-dev5, based on frozen local dev4 `6e190a4`. This source feature is
-pending independent review and Android runtime acceptance. No dev5 APK, signing,
-upload or publication is part of this change. There are no new dependencies,
-permissions, providers, services, credentials or automatic jobs.
+Version 0.1.0-dev5, based on frozen local dev4 `6e190a4`. Independent source/host
+review passes at `0ed19a14cdfe99920cf9c69a08d316a90383ba2d`: 301 export assertions,
+10 independent adversarial cases / 116 assertions, existing regressions and
+official-SDK Java source compilation. A local development test APK was built
+and signed from that reviewed source commit using the existing dev4 test
+certificate; no new key was created. This later documentation update was not
+the APK source, and no public binary release is provided. Real Android lifecycle,
+DocumentsProvider behavior, Xiaomi testing and 24-hour operation remain untested.
+There are no new dependencies, permissions, providers, services, credentials or
+automatic jobs.
 
 ## User flow
 

@@ -6,11 +6,13 @@ Native Android app source with a reviewed Java policy/storage core for a visible
 First device of interest: Xiaomi Mix Fold 4. Generic Android APIs come first;
 device-specific workarounds require measured evidence on the actual device.
 
-**Status: dev5 manual SAF export source candidate, 2026-10-09. Synthetic JVM
-export checks, existing regressions and official-SDK Java source compilation pass.
-Independent dev5 review and Android runtime testing are pending. No dev5 APK has
-been built, signed, uploaded or released. The separately delivered dev4 test APK
-is unchanged and does not contain this feature.**
+**Status: dev5 manual SAF export, 2026-10-09. Independent source/host review,
+synthetic JVM export checks, existing regressions and official-SDK Java source
+compilation pass. A local development test APK was built and signed from reviewed
+source commit `0ed19a14cdfe99920cf9c69a08d316a90383ba2d`, using the same test
+certificate as dev4; no new key was created. It is not a public binary release.
+Real Android lifecycle/provider behavior, Xiaomi testing and 24-hour operation
+remain untested. This later documentation update was not the APK source.**
 This is an independent Git repository for the Android recorder project.
 Public project: [long-audio-recorder-android](https://github.com/Headmaster218/long-audio-recorder-android).
 

@@ -1,5 +1,7 @@
 {
-  "status": "author checks passed; independent review and device acceptance pending",
+  "status": "independent source/host review and official-SDK source compilation passed; local development test APK built and signed with the existing dev4 test certificate; real Android/provider/Xiaomi/24-hour acceptance remains untested",
+  "reviewed_source_and_test_apk_commit": "0ed19a14cdfe99920cf9c69a08d316a90383ba2d",
+  "documentation_only_status_update": true,
   "baseline_local_commit": "6e190a4188fd50c4f4d638806b88f32ae910c67e",
   "version": "0.1.0-dev5",
   "export_assertions": 301,
@@ -43,8 +45,8 @@
   ],
   "not_done": [
     "Android runtime/provider/Activity instrumentation",
-    "D8/APK build or signing",
-    "upload or remote publication",
+    "public binary release",
+    "Xiaomi and 24-hour operation",
     "SMB/FTP",
     "source deletion or automatic retention"
   ],
