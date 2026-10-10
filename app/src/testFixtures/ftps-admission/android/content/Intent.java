@@ -1,0 +1,1 @@
+package android.content; public class Intent { public boolean powered=true; public int getIntExtra(String key,int fallback) { return "plugged".equals(key)?(powered?1:0):"status".equals(key)?(powered?2:3):fallback; } }

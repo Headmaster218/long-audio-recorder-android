@@ -4,9 +4,14 @@ import argparse, json, os, pathlib, signal, shutil, subprocess, time
 parser = argparse.ArgumentParser()
 parser.add_argument("--sdk", help="Existing official SDK, optional; never downloaded")
 parser.add_argument("--resource-java", help="Existing aapt-generated R.java for unchanged app resources")
-parser.add_argument("--checks", nargs="+", choices=["queue-sql","ftps","export","regressions","app-wiring","export-wiring","ftps-wiring","buffer-linkage","android-source-compile"], help="Optional focused rerun; omitted means all checks")
+parser.add_argument("--checks", nargs="+", choices=["network-admission","queue-sql","ftps","export","regressions","app-wiring","export-wiring","ftps-wiring","buffer-linkage","android-source-compile"], help="Optional focused rerun; omitted means all checks")
 args = parser.parse_args()
 if bool(args.sdk) != bool(args.resource_java): parser.error("Provide both --sdk and --resource-java, or neither")
+if args.checks and any(x in args.checks for x in ["android-source-compile","network-admission"]):
+    if not args.sdk: parser.error("Requested Android source/admission check requires existing SDK and generated R.java")
+    if "network-admission" in args.checks and "android-source-compile" not in args.checks:
+        args.checks.append("android-source-compile") # Never test stale production classfiles.
+
 root = pathlib.Path(__file__).resolve().parents[1]
 limit = 12 * 1024**2
 floor = 5 * 1024**3
@@ -63,7 +68,7 @@ run('app-wiring', ['python','scripts/check-app-review-wiring.py'])
 run('export-wiring', ['python','scripts/check-export-wiring.py'])
 run('ftps-wiring', ['python','scripts/check-ftps-wiring.py'])
 run('buffer-linkage', ['python','scripts/check-java8-buffer-linkage.py','app/build/app-review/classes'])
-if args.sdk and (not args.checks or "android-source-compile" in args.checks):
+if args.sdk and (not args.checks or "android-source-compile" in args.checks or "network-admission" in args.checks):
     android = pathlib.Path(args.sdk).resolve()/'platforms/android-37.0/android.jar'
     resource_java = pathlib.Path(args.resource_java).resolve()
     if not android.is_file() or not resource_java.is_file(): raise SystemExit('Missing SDK or generated R.java input')
@@ -73,3 +78,4 @@ if args.sdk and (not args.checks or "android-source-compile" in args.checks):
     run('android-source-compile', ['java','-Xmx48m','-XX:MaxMetaspaceSize=48m','-XX:ReservedCodeCacheSize=8m','-XX:+UseSerialGC','-XX:ActiveProcessorCount=1','-Xss256k',
         '-m','jdk.compiler/com.sun.tools.javac.Main','-source','8','-target','8','-bootclasspath',str(android),
         '-Xlint:all,-options','-d',str(out/'android-classes'),'@'+str(out/'android-sources.txt')])
+    run('network-admission', ['sh','scripts/test-ftps-admission.sh',str(android)])

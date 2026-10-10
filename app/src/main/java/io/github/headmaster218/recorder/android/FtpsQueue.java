@@ -141,6 +141,10 @@ final class FtpsQueue extends SQLiteOpenHelper {
         getWritableDatabase().execSQL("UPDATE queue SET upload_now=1 WHERE state IN ('QUEUED','RECONCILE')");
         pause(false);
     }
+    void deferForSafety(long notBefore) {
+        // Persist one queue-wide floor. Upload now does not reset it; later retry times are retained.
+        getWritableDatabase().execSQL("UPDATE queue SET next_at=MAX(next_at,?), detail='Waiting for charging, eligible unmetered Wi-Fi and local-network permission; originals retained' WHERE state IN ('QUEUED','RECONCILE')",new Object[]{notBefore});
+    }
     void begin(Item item, String attempt) throws IOException {
         SQLiteDatabase db = getWritableDatabase(); db.beginTransaction();
         try {

@@ -12,6 +12,7 @@ network=(p/'android/FtpsNetwork.java').read_text()
 credentials=(p/'android/FtpsCredentials.java').read_text()
 ui=(p/'android/FtpsControls.java').read_text()
 job=(p/'android/FtpsJobService.java').read_text()
+schedule=(p/'android/FtpsJobSchedule.java').read_text()
 assert core.index('s.command("AUTH TLS")') < core.index('control.secure(profile.host)') < core.index('s.command("USER "')
 assert 's.command("PROT P")' in core and 's.command("TYPE I")' in core
 assert 'command("EPSV")' in core and 'data.secure(host)' in core
@@ -27,7 +28,10 @@ assert 'MAX_RECONCILIATIONS' in coordinator and 'MAX_RECONCILIATIONS = 3' in que
 assert 'Executors.newSingleThreadExecutor' in coordinator and 'Arrays.fill(secret' in coordinator
 assert 'catalog.load(item.source)' in coordinator and 'entry.metadata.wavSha256.equals(item.wavHash)' in coordinator
 assert 'displayed != page' in coordinator and '!current.revision.equals(shownRevision)' in coordinator
-assert 'setRequiresCharging(true)' in coordinator and 'NETWORK_TYPE_UNMETERED' in coordinator
+assert 'setRequiresCharging(true)' in schedule and 'setRequiredNetworkType(JobInfo.NETWORK_TYPE_NONE)' in schedule
+assert 'FtpsJobSchedule.build(' in coordinator and 'setRequiredNetworkType' not in coordinator
+assert coordinator.index('FtpsNetwork.allowed(context') < coordinator.index('secret = password(profile)') < coordinator.index('queue.begin(item,attempt)')
+assert 'queue.deferForSafety(now + 300000)' in coordinator and 'next_at=MAX(next_at,?)' in queue
 assert 'job.cancel()' in job and 'queue.verified(item,result)' in coordinator
 assert 'TLSv1.2' in network and 'TLSv1.3' in network and 'setEndpointIdentificationAlgorithm("HTTPS")' in network
 assert 'SSLSocketFactory.getDefault()' in network and 'connectPeer(host,peer,port)' in network

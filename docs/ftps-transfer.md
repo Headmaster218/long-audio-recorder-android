@@ -92,8 +92,15 @@ BLOCKED auth/TLS/partial rows do not reset automatically. There is no row-remova
 replacement-attempt or remote-cleanup UI in this version. Limits fail clearly;
 they never prune recordings or receipts.
 
-Native JobScheduler requires charging and an unmetered network; the app adds its
-stricter Wi-Fi/VPN checks. Persisted scheduling uses RECEIVE_BOOT_COMPLETED; there
+Native JobScheduler now provides a charging-only wake. Its UNMETERED shorthand
+requires validated Internet; even a custom request can be limited to the UID's
+default network. Both can strand local-only NAS Wi-Fi. The existing runtime gate
+still requires and selects eligible unmetered Wi-Fi before password retrieval,
+DNS or TCP; every socket remains bound to that exact Network. Unsafe/unavailable
+routes durably defer every runnable row for five minutes, preserving longer
+retry times. Upload now and reopening do not reset that delay. This can wake a
+job without usable Wi-Fi, but it performs no secret unlock or network I/O then.
+Persisted scheduling uses RECEIVE_BOOT_COMPLETED; there
 is no app boot receiver and it never restarts the microphone. Process/screen
 reopening reschedules retained authorized work, covering a crash between queue
 commit and scheduler submission. Main-thread schedule serials and active-job
@@ -176,10 +183,11 @@ Author checks at this source candidate:
   write/close/final-reply loss, short/extra/same-size-corrupt/zero/unreadable data,
   metadata/marker/later mutation, source mutation with unchanged mtime, traversal,
   attempt binding and cancellation. Counts include repeated checks.
-- 19 host SQLite assertions execute production schema, restart, credentials-ready
+- 27 host SQLite assertions execute production schema, restart, credentials-ready
   and upload-trigger SQL. Check unique/foreign-key constraints, transaction
   rollback, file reopen, idempotent recovery, profile separation, retained attempt,
-  terminal states, pause/receipt retention and integrity_check. Fixture updates
+  terminal states, pause/receipt retention, queue-wide safety deferral and
+  integrity_check. Fixture updates
   model Java ContentValues; Java queue methods and Android SQLite are NOT executed.
 - Existing export 301, core 7,068 + 14 adversarial cases, storage 389 + 11 cases,
   app helpers 58 + 7 cases, plus app/export/FTPS source-wiring and Java-8 buffer
@@ -190,7 +198,12 @@ Author checks at this source candidate:
   compile rejected a non-public getTransportTypes call; it was removed and the
   corrected source compile passed. Initial failure evidence is preserved.
 
-`docs/ftps-host-checks.json` records check results and the tested-source digest.
+`docs/ftps-host-checks.json` preserves the original `61b286c` author evidence.
+The separately committed [F1 scheduler correction](ftps-admission-fix.md) and
+`docs/ftps-admission-checks.json` record the fixed-source tests/digest and original
+finding reference. Host API fixtures additionally execute the production job
+factory and route admission across modeled API flags 29–37. They are not runs on
+nine Android images. Detailed test bounds are in the correction report.
 Detailed ignored logs/receipts are in `app/build/ftps-checks/`. The guarded runner
 uses CPU 6/nice 19, samples process-tree RSS under 256 MiB, enforces a 12 MiB
 feature-worktree bound and 5 GiB free-space floor. It downloads nothing, signs

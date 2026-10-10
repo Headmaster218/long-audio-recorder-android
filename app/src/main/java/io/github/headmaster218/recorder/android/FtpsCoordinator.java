@@ -211,19 +211,21 @@ final class FtpsCoordinator {
         for (FtpsQueue.Item item : items) if (item.nextAt <= now && triggered(item,total,now)) { selected = item; break; }
         if (selected == null) return;
         final FtpsQueue.Item item = selected;
-        FtpsQueue.Profile profile = queue.profile(item.revision); char[] secret = null;
+        char[] secret = null;
         try {
+            final Network selectedNetwork;
+            try { selectedNetwork = FtpsNetwork.allowed(context,total,Math.max(0,now - item.queuedAt),item.uploadNow || item.attempt != null); }
+            catch (IOException | RuntimeException e) {
+                // One durable deferral covers every runnable row, not one 1-second job per queued file.
+                queue.deferForSafety(now + 300000);
+                publish("Transfer safety gates are not satisfied. Upload now cannot bypass them.",false); return;
+            }
+            FtpsQueue.Profile profile = queue.profile(item.revision);
             if (profile == null) { queue.state(item,"BLOCKED","Saved destination is unavailable",0); return; }
             try { secret = password(profile); }
             catch (Exception e) {
                 queue.state(item,"NEEDS_CREDENTIALS","Password unavailable or secure storage locked. Unlock device and explicitly save credentials for this exact profile again.",0);
                 publish("Transfer blocked until credentials are supplied for the exact destination revision.",false); return;
-            }
-            final Network selectedNetwork;
-            try { selectedNetwork = FtpsNetwork.allowed(context,total,Math.max(0,now - item.queuedAt),item.uploadNow || item.attempt != null); }
-            catch (IOException | RuntimeException e) {
-                queue.state(item,item.state,"Waiting for charging, unmetered Wi-Fi and local-network permission; VPN/ambiguous routes are blocked",now + 300000);
-                publish("Transfer safety gates are not satisfied. Upload now cannot bypass them.",false); return;
             }
             final CommittedSegments.Entry entry;
             try {
@@ -299,9 +301,7 @@ final class FtpsCoordinator {
     private void scheduleOnMain(long delay) {
         JobScheduler scheduler = (JobScheduler) context.getSystemService(Context.JOB_SCHEDULER_SERVICE);
         if (delay < 0) { scheduler.cancel(JOB_ID); return; }
-        JobInfo job = new JobInfo.Builder(JOB_ID,new ComponentName(context,FtpsJobService.class))
-            .setRequiresCharging(true).setRequiredNetworkType(JobInfo.NETWORK_TYPE_UNMETERED)
-            .setPersisted(true).setMinimumLatency(delay).setBackoffCriteria(60000,JobInfo.BACKOFF_POLICY_EXPONENTIAL).build();
+        JobInfo job = FtpsJobSchedule.build(JOB_ID,new ComponentName(context,FtpsJobService.class),delay);
         if (scheduler.schedule(job) != JobScheduler.RESULT_SUCCESS) {
             Snapshot old = snapshot;
             snapshot = new Snapshot(old.page,old.profile,old.items,old.destinations,
