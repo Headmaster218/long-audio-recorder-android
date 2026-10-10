@@ -48,16 +48,16 @@ assert 'setUnlockedDeviceRequired(true)' in credentials and 'cipher.updateAAD(re
 assert 'remember.setChecked(false)' in ui and 'password.setSaveEnabled(false)' in ui
 assert 'selectedPage != s.page' in ui and 'Queue this recording' in ui and 'LAN_REQUEST = 6201' in ui
 assert 'requestPermissions(new String[]{FtpsNetwork.LAN_PERMISSION}' in ui
-# Baseline capture, stop-on-full behavior and deletion gate are not changed by this source slice.
-for rel in ['android/CaptureEngine.java','android/RecordingService.java','core/CachePolicy.java','core/DeletionGate.java']:
+# Service, stop-on-full policy and deletion gate remain byte-identical to the dev6 baseline.
+# CaptureEngine changes are covered separately by check-capture-anchor-wiring.py.
+for rel in ['android/RecordingService.java','core/CachePolicy.java','core/DeletionGate.java']:
     tracked='app/src/main/java/io/github/headmaster218/recorder/'+rel
-    baseline=subprocess.check_output(['git','-C',str(root),'show','e497f32fd27a28cd28a54c646d71baef61629637:'+tracked])
-    if rel == 'android/CaptureEngine.java':
-        baseline=baseline.replace(b'Stopped. Local recordings are preserved. No upload or deletion occurred.', b'Stopped. Local recordings are preserved.')
+    baseline=subprocess.check_output(['git','-C',str(root),'show','60767916fd4cdd735c5cec2cef643aa3e37523a3:'+tracked])
     assert (p/rel).read_bytes()==baseline, rel
-assert (root/'VERSION').read_text().strip()=='0.1.0-dev6'
+subprocess.check_call(['python3',str(root/'scripts/check-capture-anchor-wiring.py')])
+assert (root/'VERSION').read_text().strip()=='0.1.0-dev7'
 a='{http://schemas.android.com/apk/res/android}'
 m=ET.parse(root/'app/src/main/AndroidManifest.xml').getroot()
-assert m.attrib[a+'versionCode']=='6' and m.attrib[a+'versionName']=='0.1.0-dev6'
+assert m.attrib[a+'versionCode']=='7' and m.attrib[a+'versionName']=='0.1.0-dev7'
 print('PASS FTPS source wiring: authenticated TLS flow, bound route, durable-before-I/O intent, exact source/profile admission, read-only reconciliation, explicit credential consent and no deletion')
 print('No Android/SQLite/credential/TLS/socket behavior was executed; device/runtime acceptance remains pending.')

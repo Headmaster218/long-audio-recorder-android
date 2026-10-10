@@ -27,13 +27,23 @@ public final class CaptureTimeline {
         public final String payloadSha256;
         public final Close closeReason;
         public final boolean trustedPreviousSeam;
+        public final CaptureAnchors captureAnchors;
         private SegmentManifest(Epoch epoch, long sequence, long frameStart, long frameCount,
                                 String hash, Close closeReason, boolean trustedPreviousSeam) {
             this.epoch = epoch; this.sequence = sequence; this.frameStart = frameStart;
             this.frameCount = frameCount; this.payloadBytes = epoch.format.bytesForFrames(frameCount);
             this.payloadSha256 = hash; this.closeReason = closeReason;
             this.trustedPreviousSeam = trustedPreviousSeam;
+            this.captureAnchors = null;
         }
+        private SegmentManifest(SegmentManifest original,CaptureAnchors anchors) {
+            anchors.validate(original.epoch,original.frameCount);
+            this.epoch = original.epoch; this.sequence = original.sequence; this.frameStart = original.frameStart;
+            this.frameCount = original.frameCount; this.payloadBytes = original.payloadBytes;
+            this.payloadSha256 = original.payloadSha256; this.closeReason = original.closeReason;
+            this.trustedPreviousSeam = original.trustedPreviousSeam; this.captureAnchors = anchors;
+        }
+        SegmentManifest withAnchors(CaptureAnchors anchors) { return new SegmentManifest(this,anchors); }
     }
     private Epoch epoch;
     private final long targetFrames;

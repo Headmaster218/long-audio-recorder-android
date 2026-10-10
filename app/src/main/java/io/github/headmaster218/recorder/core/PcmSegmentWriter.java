@@ -20,6 +20,9 @@ public final class PcmSegmentWriter {
     private SegmentStore.Staging staging;
     private MessageDigest pcmHash = sha256();
     private boolean terminal;
+    private CaptureAnchors.Collector anchors;
+    private Boolean observedMode;
+    private CaptureAnchors.Read previousObservation;
     public PcmSegmentWriter(SegmentStore store, Epoch epoch, long targetFrames, long nextSequence, Listener listener) {
         if (store == null || listener == null) throw new IllegalArgumentException();
         new Intent(epoch, nextSequence, 0, targetFrames);
@@ -28,9 +31,25 @@ public final class PcmSegmentWriter {
         this.timeline = new CaptureTimeline(epoch, targetFrames, nextSequence);
     }
     public void append(byte[] bytes, int offset, int length) throws IOException {
+        append(bytes,offset,length,null);
+    }
+    /** Exact PCM slicing is unchanged; observations travel with the producer read, never writer time. */
+    public void append(byte[] bytes,int offset,int length,CaptureAnchors.Read observation) throws IOException {
         live();
         if (bytes == null || offset < 0 || length < 0 || offset > bytes.length - length)
             throw new IllegalArgumentException("input range");
+        if (observation != null && (length % 2 != 0 || length / 2 != observation.samplesAfter - observation.samplesBefore))
+            throw new IllegalArgumentException("read/PCM length mismatch");
+        if (length > 0 && observedMode != null && observedMode.booleanValue() != (observation != null))
+            throw new IllegalArgumentException("cannot mix observed/unobserved appends");
+        if (observation != null && previousObservation != null
+            && (!observation.runId.equals(previousObservation.runId)
+                || !observation.processClockDomain.equals(previousObservation.processClockDomain)
+                || observation.samplesBefore != previousObservation.samplesAfter
+                || previousObservation.ordinal == Long.MAX_VALUE || observation.ordinal != previousObservation.ordinal + 1))
+            throw new IllegalArgumentException("noncontiguous producer observation across segments");
+        if (length > 0) observedMode = Boolean.valueOf(observation != null);
+        int consumed = 0;
         try {
             while (length > 0) {
                 if (staging == null) {
@@ -43,11 +62,18 @@ public final class PcmSegmentWriter {
                 long completedFrames = (segmentBytes % frameBytes + count) / frameBytes;
                 if (epochFrames > Long.MAX_VALUE - completedFrames) throw new IOException("frame counter exhausted");
                 staging.append(bytes, offset, count);
+                if (observation != null) {
+                    if (anchors == null) anchors = new CaptureAnchors.Collector();
+                    anchors.add(observation,observation.samplesBefore + consumed / 2,
+                                observation.samplesBefore + (consumed + count) / 2);
+                }
+                consumed += count;
                 pcmHash.update(bytes, offset, count);
                 if (completedFrames > 0) timeline.appendFrames(completedFrames);
                 segmentBytes += count; epochFrames += completedFrames; offset += count; length -= count;
                 if (segmentBytes == targetBytes) finish(Close.ROTATION);
             }
+            if (observation != null) previousObservation = observation;
         } catch (IOException | RuntimeException e) { fail(e); throw e; }
     }
     /** A route/restart boundary never borrows continuity from the previous epoch. */
@@ -60,7 +86,9 @@ public final class PcmSegmentWriter {
             throw new IllegalArgumentException("invalid epoch transition");
         try {
             if (staging != null) finish(Close.INTERRUPTION);
-            timeline.beginEpoch(next); epoch = next; epochFrames = 0;
+            timeline.beginEpoch(next);
+            if (!next.runId.equals(epoch.runId)) previousObservation = null;
+            epoch = next; epochFrames = 0;
         } catch (IOException | RuntimeException e) { fail(e); throw e; }
     }
     public void stop() throws IOException { close(Close.STOP); }
@@ -73,8 +101,10 @@ public final class PcmSegmentWriter {
     private void finish(Close reason) throws IOException {
         if (segmentBytes % (epoch.format.channels * 2) != 0)
             throw new IOException("incomplete frame preserved in staging; recovery required");
-        SegmentStore.Published result = staging.finish(timeline.seal(hex(pcmHash.digest()), reason));
-        staging = null; segmentBytes = 0; sequence++; pcmHash = sha256();
+        CaptureTimeline.SegmentManifest manifest = timeline.seal(hex(pcmHash.digest()), reason);
+        if (anchors != null) manifest = manifest.withAnchors(anchors.freeze());
+        SegmentStore.Published result = staging.finish(manifest);
+        staging = null; segmentBytes = 0; sequence++; pcmHash = sha256(); anchors = null;
         listener.published(result);
     }
     private void fail(Throwable failure) {

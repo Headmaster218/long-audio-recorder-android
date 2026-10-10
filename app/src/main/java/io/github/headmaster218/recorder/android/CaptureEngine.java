@@ -7,6 +7,7 @@ import android.media.AudioManager;
 import android.media.AudioRecord;
 import android.media.AudioRecordingConfiguration;
 import android.media.AudioRouting;
+import android.media.AudioTimestamp;
 import android.media.MediaRecorder;
 import android.os.Handler;
 import android.os.Looper;
@@ -19,6 +20,7 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import io.github.headmaster218.recorder.core.CachePolicy;
+import io.github.headmaster218.recorder.core.CaptureAnchors;
 import io.github.headmaster218.recorder.core.CaptureTimeline;
 import io.github.headmaster218.recorder.core.DirectorySpool;
 import io.github.headmaster218.recorder.core.PcmSegmentWriter;
@@ -28,11 +30,13 @@ import io.github.headmaster218.recorder.core.PcmReadAccounting;
 final class CaptureEngine implements Runnable {
     enum Stop { NONE, PAUSE, STOP, INTERRUPTED }
     interface Completion { void finished(CaptureEngine engine,String result,boolean paused,long nextEpoch); }
+    // Identifies only this process clock domain, never hardware or a persistent boot identity.
+    private static final String PROCESS_CLOCK_DOMAIN = UUID.randomUUID().toString();
     private static final int BLOCK_SAMPLES = 2048, BLOCKS = 16;
     private static final class Block {
         final short[] samples = new short[BLOCK_SAMPLES];
         final byte[] bytes = new byte[BLOCK_SAMPLES * 2];
-        int count; Snapshot snapshot; boolean uncertain;
+        int count; Snapshot snapshot; boolean uncertain; CaptureAnchors.Read observation;
     }
     private static final class Snapshot {
         final String route, physicalFormat;
@@ -91,11 +95,11 @@ final class CaptureEngine implements Runnable {
                     }
                     // Explicit little-endian serialization; no native-endian assumptions.
                     for (int i=0;i<block.count;i++) { short value = block.samples[i]; block.bytes[i*2] = (byte) value; block.bytes[i*2+1] = (byte) (value >>> 8); }
-                    writer.append(block.bytes,0,block.count*2);
+                    writer.append(block.bytes,0,block.count*2,block.observation);
                     if (!accounting.appendConfirmed(block.count)) throw new IOException("PCM acknowledgement counters overflowed");
                     RecorderState.writtenFrames += block.count / settings.channels;
                     RecorderState.route = current.route; previous = current;
-                } finally { block.snapshot = null; free.offer(block); }
+                } finally { block.snapshot = null; block.observation = null; free.offer(block); }
             }
             if (writer != null) {
                 if (failure == null && stop == Stop.STOP) writer.stop(); else writer.interrupt();
@@ -153,6 +157,9 @@ final class CaptureEngine implements Runnable {
             @Override public void onRecordingConfigChanged(List<AudioRecordingConfiguration> configs) { configurationEvents.incrementAndGet(); }
         };
         Block held = null; boolean routesRegistered = false, configRegistered = false;
+        long positiveReadOrdinal = 0, runSamples = 0, lastTimestampQuery = -1;
+        CaptureAnchors.Observer observer = new CaptureAnchors.Observer();
+        String previousObservedRoute = null;
         long previousVersion = -1, lastData = SystemClock.elapsedRealtime(), lastPermissionCheck = 0;
         try {
             recorder.addOnRoutingChangedListener(routeListener,new Handler(Looper.getMainLooper())); routesRegistered = true;
@@ -170,7 +177,9 @@ final class CaptureEngine implements Runnable {
                 held = free.poll();
                 if (held == null) throw new IOException("Bounded storage queue is full; stopped with an unknown capture gap");
                 long before = configurationEvents.get();
+                long readBefore = SystemClock.elapsedRealtimeNanos();
                 int count = recorder.read(held.samples,0,BLOCK_SAMPLES,AudioRecord.READ_NON_BLOCKING);
+                long readAfter = SystemClock.elapsedRealtimeNanos();
                 if (count < 0) throw new IOException(count == AudioRecord.ERROR_DEAD_OBJECT
                     ? "AudioRecord died; explicit user restart required" : "AudioRecord read failed: " + count);
                 if (count == 0) {
@@ -183,6 +192,35 @@ final class CaptureEngine implements Runnable {
                 Snapshot snapshot = snapshot(recorder);
                 long after = configurationEvents.get();
                 held.count = count; held.snapshot = snapshot; held.uncertain = previousVersion >= 0 && (after != previousVersion || before != after);
+                long wallBefore = SystemClock.elapsedRealtimeNanos();
+                long wallMillis = System.currentTimeMillis();
+                long wallAfter = SystemClock.elapsedRealtimeNanos();
+                long uptime = SystemClock.uptimeMillis();
+                CaptureAnchors.Timestamp timestamp = CaptureAnchors.Timestamp.notPolled();
+                if (lastTimestampQuery < 0 || (readAfter >= lastTimestampQuery && readAfter - lastTimestampQuery >= 1000000000L)) {
+                    long queryBefore = SystemClock.elapsedRealtimeNanos();
+                    lastTimestampQuery = queryBefore;
+                    AudioTimestamp raw = new AudioTimestamp();
+                    int result = 0; CaptureAnchors.TimestampStatus status;
+                    try {
+                        result = recorder.getTimestamp(raw,AudioTimestamp.TIMEBASE_BOOTTIME);
+                        status = result == AudioRecord.SUCCESS ? CaptureAnchors.TimestampStatus.AVAILABLE : CaptureAnchors.TimestampStatus.UNAVAILABLE;
+                    } catch (RuntimeException unavailable) {
+                        status = CaptureAnchors.TimestampStatus.QUERY_EXCEPTION;
+                    }
+                    long queryAfter = SystemClock.elapsedRealtimeNanos();
+                    boolean available = status == CaptureAnchors.TimestampStatus.AVAILABLE;
+                    timestamp = new CaptureAnchors.Timestamp(status,result,available ? raw.framePosition : 0,
+                        available ? raw.nanoTime : 0,queryBefore,queryAfter);
+                }
+                int flags = observer.flags(positiveReadOrdinal,readBefore,readAfter,wallBefore,wallMillis,wallAfter,uptime,before,after,timestamp);
+                if (held.uncertain || (previousObservedRoute != null && !previousObservedRoute.equals(snapshot.route))) flags |= CaptureAnchors.ROUTE_UNCERTAIN;
+                previousObservedRoute = snapshot.route;
+                if (runSamples > Long.MAX_VALUE - count || positiveReadOrdinal == Long.MAX_VALUE)
+                    throw new IOException("Capture observation counters exhausted; PCM accounting retained");
+                held.observation = new CaptureAnchors.Read(PROCESS_CLOCK_DOMAIN,runId,positiveReadOrdinal,runSamples,runSamples+count,
+                    readBefore,readAfter,wallBefore,wallMillis,wallAfter,uptime,before,after,timestamp,flags);
+                observer.accepted(held.observation); runSamples += count; positiveReadOrdinal++;
                 previousVersion = after;
                 if (!ready.offer(held)) throw new IOException("Bounded writer queue refused PCM; uncertain uncommitted buffer");
                 held = null;

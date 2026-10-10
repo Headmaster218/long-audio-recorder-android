@@ -22,7 +22,7 @@ accepted = engine.index("accounting.readAccepted(count)")
 attribution = engine.index("Snapshot snapshot = snapshot(recorder)")
 enqueue = engine.index("ready.offer(held)")
 assert read < engine.index("if (count < 0)") < engine.index("if (count == 0)") < accepted < attribution < enqueue
-assert engine.index("writer.append(block.bytes,0,block.count*2)") < engine.index("accounting.appendConfirmed(block.count)")
+assert engine.index("writer.append(block.bytes,0,block.count*2,block.observation)") < engine.index("accounting.appendConfirmed(block.count)")
 assert engine.index("producer.join(1000)") < engine.index("accounting.snapshot()")
 assert "result = finalAccounting.warning() + result;" in engine
 assert 'ready.isEmpty() ? ""' not in engine

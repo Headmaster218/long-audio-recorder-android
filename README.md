@@ -1,6 +1,12 @@
 # Android recorder
 
-Version: **0.1.0-dev6** (explicit-FTPS source candidate; no dev6 APK or release).
+Version: **0.1.0-dev7** (capture-observation source candidate; no dev7 APK or release).
+
+Dev7 adds bounded producer-side capture observations inside a version-2 manifest.
+New readers preserve old version-1 metadata bytes exactly; older apps cannot read
+new version-2 recordings. Observations do not establish hardware-frame-to-PCM
+mapping or loss-free capture. See [capture anchors, schema and validation limits](docs/capture-anchors.md).
+Independent review and device validation remain required.
 
 Native Android app source with a reviewed Java policy/storage core for a visible recorder.
 First device of interest: Xiaomi Mix Fold 4. Generic Android APIs come first;
