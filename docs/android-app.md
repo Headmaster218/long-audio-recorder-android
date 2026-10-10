@@ -1,7 +1,10 @@
 # Visible Android recorder source slice
 
-This page records the dev4 recorder baseline. The dev5 source candidate appends
-[manual SAF export](manual-export.md); it does not change capture/service logic.
+This page records the dev4 recorder baseline, including its historical permission
+list. Dev5 appends [manual SAF export](manual-export.md). The dev6 source candidate
+adds [explicit FTPS](ftps-transfer.md), network permissions and a separate protected
+JobService; it preserves capture/service behavior. Only the old capture Stop
+status wording changes to avoid claiming that no independent transfer occurred.
 
 Development version 0.1.0-dev4 adds actual Android app/service source above the
 reviewed dev3 JVM policy and storage layers. Independent source/helper review and

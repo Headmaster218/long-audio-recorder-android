@@ -117,7 +117,7 @@ final class CaptureEngine implements Runnable {
             boolean paused = failure == null && stop == Stop.PAUSE;
             String result = failure != null ? failure + " Local files are preserved; recording will not restart automatically."
                 : paused ? "Paused. Tap Start to resume with a new run and uncertain epoch."
-                : "Stopped. Local recordings are preserved. No upload or deletion occurred.";
+                : "Stopped. Local recordings are preserved.";
             // Keep the accounting warning first so bounded status persistence cannot truncate it away.
             result = finalAccounting.warning() + result;
             completion.finished(this,result,paused,epochNumber == Long.MAX_VALUE ? epochNumber : epochNumber + 1);

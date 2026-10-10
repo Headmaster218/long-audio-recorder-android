@@ -127,6 +127,8 @@ public final class CommittedSegments {
         boolean more = selected.size() > PAGE_SIZE; if (more) selected.pollLastEntry();
         return new Page(new ArrayList<Entry>(selected.values()), more, rejected);
     }
+    /** Re-admit a durable queue identity; the same strict .ready allowlist applies. */
+    public Entry load(String id) throws IOException { return inspect(id); }
     public void unchanged(Entry entry) throws IOException {
         if (entry == null || entry.owner != this) throw new IOException("entry was not admitted by this catalog");
         Entry now = inspect(entry.id);

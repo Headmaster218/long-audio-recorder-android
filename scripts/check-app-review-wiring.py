@@ -40,7 +40,9 @@ manifest = ET.parse(root / "app/src/main/AndroidManifest.xml").getroot()
 permissions = {item.attrib[android + "name"] for item in manifest.findall("uses-permission")}
 assert permissions == {
     "android.permission.RECORD_AUDIO", "android.permission.POST_NOTIFICATIONS",
-    "android.permission.FOREGROUND_SERVICE", "android.permission.FOREGROUND_SERVICE_MICROPHONE"
+    "android.permission.FOREGROUND_SERVICE", "android.permission.FOREGROUND_SERVICE_MICROPHONE",
+    "android.permission.INTERNET", "android.permission.ACCESS_NETWORK_STATE",
+    "android.permission.ACCESS_LOCAL_NETWORK", "android.permission.RECEIVE_BOOT_COMPLETED"
 }
 application = manifest.find("application")
 assert application is not None
@@ -48,10 +50,16 @@ assert application.attrib[android + "allowBackup"] == "false"
 assert application.attrib[android + "usesCleartextTraffic"] == "false"
 assert not application.findall("receiver") and not application.findall("provider")
 services = application.findall("service")
-assert len(services) == 1 and services[0].attrib[android + "exported"] == "false"
-assert services[0].attrib[android + "foregroundServiceType"] == "microphone"
+assert len(services) == 2
+by_name = {item.attrib[android+"name"]: item for item in services}
+assert set(by_name) == {".RecordingService", ".FtpsJobService"}
+assert by_name[".RecordingService"].attrib[android+"exported"] == "false"
+assert by_name[".RecordingService"].attrib[android+"foregroundServiceType"] == "microphone"
+assert by_name[".FtpsJobService"].attrib[android+"permission"] == "android.permission.BIND_JOB_SERVICE"
+assert by_name[".FtpsJobService"].attrib[android+"exported"] == "true"
+assert android+"foregroundServiceType" not in by_name[".FtpsJobService"].attrib
 activities = application.findall("activity")
 assert len(activities) == 1 and activities[0].attrib[android + "name"] == ".MainActivity"
 assert activities[0].attrib[android + "exported"] == "true"
-print("PASS current manifest: one exported launcher, private microphone service, no network/storage/autostart components")
+print("PASS current manifest: one launcher, private microphone service and system-permission-protected FTPS JobService; no provider/receiver/storage-wide permission")
 print("These source checks supplement logic tests; permission/lifecycle/notification behavior still requires a device.")

@@ -1,0 +1,242 @@
+{
+  "candidate": "0.1.0-dev6 source only; independent review pending",
+  "baseline_commit": "e497f32fd27a28cd28a54c646d71baef61629637",
+  "recorded_utc": "2026-10-09T22:22:13.310457+00:00",
+  "source_manifest_format": "sha256 + two spaces + relative path + newline, sorted paths",
+  "tested_source_manifest_sha256": "b39be04735d2b372136c181886f5610fb1c5070fa429af1fad8efdf32918f432",
+  "tested_source_files": {
+    "VERSION": "6587eb164d4a4124a06700c52b09f6f39bf24c7d2cfd810d6bd9908d44e1c849",
+    "app/build.gradle": "a8cdfeb537c9f44715e109ba43c44698196a5fc436778408e25417e3c12fefbe",
+    "app/src/main/AndroidManifest.xml": "230e2d023ed2decf528df5251ad73933f91a99a220686a1ce19a9ccecc67c6db",
+    "app/src/main/java/io/github/headmaster218/recorder/android/AndroidDirectoryProtocol.java": "41224d944ea9a89f9abf27e92bebeadfd477e00f7fa3b3ac9aa7d2cd885f123c",
+    "app/src/main/java/io/github/headmaster218/recorder/android/CaptureEngine.java": "ca37a18f86fbe1d5a0dec5b8662223c547e93cf2aa490624aadf584a00cd72e6",
+    "app/src/main/java/io/github/headmaster218/recorder/android/ExportControls.java": "6ad1b9ede91960a665ac96ab6b8b6895f95090aa970016b5debe412a548dd4e2",
+    "app/src/main/java/io/github/headmaster218/recorder/android/ExportCoordinator.java": "7be7306a6627684dc207bff6e171650d07004c4cf9c777b5d18774d5be5f6221",
+    "app/src/main/java/io/github/headmaster218/recorder/android/FtpsControls.java": "86849f373147ab880a0377c7b19afa90c532e7e7086fd89101292f277fb58e0f",
+    "app/src/main/java/io/github/headmaster218/recorder/android/FtpsCoordinator.java": "00db5fb01178a5f3ba3454c64d1fd9ad2383c42da48d68ccc1066ea072380b11",
+    "app/src/main/java/io/github/headmaster218/recorder/android/FtpsCredentials.java": "1b3903ec51987fb992ca3bd6130b51fe295d07a7f7b122399182167ae2cea30a",
+    "app/src/main/java/io/github/headmaster218/recorder/android/FtpsJobService.java": "1114f1b2577e869a2ddc1259a7bc794ec3c65dac02281264e3c41e62ec2bd81f",
+    "app/src/main/java/io/github/headmaster218/recorder/android/FtpsNetwork.java": "4712789d2263b40877139b03719dfc641420d7fa10fadb230366fbe6cf756565",
+    "app/src/main/java/io/github/headmaster218/recorder/android/FtpsQueue.java": "6850d74abba798ed77bb685852fdadc48191584927dfa5bbefa8c3fa34c244f7",
+    "app/src/main/java/io/github/headmaster218/recorder/android/MainActivity.java": "c741be0b5539058c843691925232e3e5e6d508d8f41922999c794cba14b52d5b",
+    "app/src/main/java/io/github/headmaster218/recorder/android/RecorderState.java": "f5b6116f2c60dfe36d55f642d6ab5f0c71d2af8f81831fd16c642703d914c054",
+    "app/src/main/java/io/github/headmaster218/recorder/android/RecordingService.java": "83877169d3950602d8e2b7f41eeb2d9d6bd0e0bc6d48e1b69ff0358af59ec5ed",
+    "app/src/main/java/io/github/headmaster218/recorder/android/RecordingSettings.java": "283035c4c19e5da99581999899684f494960a453d7f5019b491383d0b0cb257e",
+    "app/src/main/java/io/github/headmaster218/recorder/core/CachePolicy.java": "7040192416b63006e81704284b465951a2d3ee4155eec3d328a3b80a21815458",
+    "app/src/main/java/io/github/headmaster218/recorder/core/CaptureTimeline.java": "5592db2ad7da64bce0b78ffcee14d3f5557127bd3e87131b57de4ec703bb623f",
+    "app/src/main/java/io/github/headmaster218/recorder/core/Checks.java": "f382d3fbcef67394ad6c644c45d0f62bd3e5c82b48ed69c2461daebdadeb54c6",
+    "app/src/main/java/io/github/headmaster218/recorder/core/CleanPauseGate.java": "e48828458c8a51449ae900b44c96f0b9836101e662e4d6bf5223140fb113eaba",
+    "app/src/main/java/io/github/headmaster218/recorder/core/CommittedSegments.java": "58e7ac5182d91e010b91fdd0469b3500053bb56821f54eff54549635be8df686",
+    "app/src/main/java/io/github/headmaster218/recorder/core/DeletionGate.java": "19b02379e25661167fe32cc8dafba4d76018ce95e2bb477c2417e9eaca35e1b6",
+    "app/src/main/java/io/github/headmaster218/recorder/core/DirectorySpool.java": "a325e7ac85151aa67c0e042f4caf910e292debc3cdc89bd9808169efa8af28c4",
+    "app/src/main/java/io/github/headmaster218/recorder/core/ExportPickerTicket.java": "ed7b5e2da4ea3016700827502866f4d068f1278cc1093869a6097e2c080a4fcd",
+    "app/src/main/java/io/github/headmaster218/recorder/core/ExportSession.java": "e3c439f13c1599c5a3e5009ea92215c125ccef00671138c06817df55084fffe7",
+    "app/src/main/java/io/github/headmaster218/recorder/core/FtpsTransfer.java": "e3a127de95235e310cd2f304edeff989e3fb99a62ce64c768a07976f656a5033",
+    "app/src/main/java/io/github/headmaster218/recorder/core/PcmFormat.java": "f1155d6cbf7d153dd5a1011d0bf59b43cacc0143f6d19df6c5522c8d440e33fe",
+    "app/src/main/java/io/github/headmaster218/recorder/core/PcmReadAccounting.java": "4c560d64acd3100f89eec3bf36d3a25bda23ba9d112cbe002ee4b9830c5a35d6",
+    "app/src/main/java/io/github/headmaster218/recorder/core/PcmSegmentWriter.java": "b82a1e975851316df75417e5f4cc4b095cb3409f4effe66445d4f0d0dc4736f1",
+    "app/src/main/java/io/github/headmaster218/recorder/core/QuotaLedger.java": "caf2d108258777726068b0d25f75360b0871d44f0a7fe7040c0c912c5d28cd1d",
+    "app/src/main/java/io/github/headmaster218/recorder/core/SegmentMetadata.java": "d89f97d371ad582b1fed50c06616c844a48197a5519345cd46d1b5c7056e3958",
+    "app/src/main/java/io/github/headmaster218/recorder/core/SegmentStore.java": "c6447dd2db4981914c9cf09eea83b3e590b7246a94b090c1209c4a3dd09ba055",
+    "app/src/main/java/io/github/headmaster218/recorder/core/TransferPolicy.java": "1a515f473c6b439fe092ec41517a9a39983907d15e8fbcfeea5865f81e6b0c6c",
+    "app/src/main/java/io/github/headmaster218/recorder/core/VerifiedExport.java": "da2baae9cee6ae403addfea0614c7bd9b00f255a55077b8fc99252e3f049425d",
+    "app/src/main/java/io/github/headmaster218/recorder/core/WavHeader.java": "6dab9b227b78e294df2eee9bc3acadd5f6dcf6a121926d038a50750df4de151e",
+    "app/src/main/res/drawable/ic_mic.xml": "5835467c7bb05585ba04fa6169409c315b23e70e523f982636b1309791c3c6fc",
+    "app/src/test/java/io/github/headmaster218/recorder/core/AdversarialAppRunSafetyTest.java": "1b81105751cb9c4db5182985e0dc28d02416d70ad5b8f338e6a3ba992cc0b260",
+    "app/src/test/java/io/github/headmaster218/recorder/core/AdversarialCoreTest.java": "46cf21262f229d35615f738836f3573fca7a505e115ae27235f6681927ee51ce",
+    "app/src/test/java/io/github/headmaster218/recorder/core/AdversarialStorageTest.java": "61f8631eb80134c24f52a4adc700d64b7d9df6fa05ffd067e8ab4f89f235472a",
+    "app/src/test/java/io/github/headmaster218/recorder/core/AppRunSafetyTest.java": "c853ff7bc2f56cc5ff098c3705ad41510546eeebddbb3b71b9e4798993da73b6",
+    "app/src/test/java/io/github/headmaster218/recorder/core/CoreTest.java": "895195133c1920b8803955a27f3385349eb92aadf2945b7a2303b1066c855886",
+    "app/src/test/java/io/github/headmaster218/recorder/core/ExportTest.java": "43b49a6b0996069c79befaa8195f3cb9b7d4b929cef51649d5139821c1dcc34c",
+    "app/src/test/java/io/github/headmaster218/recorder/core/FtpsTest.java": "e05027da8a5bb1c4e1013a09953b7774c8fdfd307b9075f2a0927f49ad0dee41",
+    "app/src/test/java/io/github/headmaster218/recorder/core/StorageTest.java": "7cc2c2985c48485f7474b26184703fe7f110949819a00efbff9a8b1783ae9bcf",
+    "scripts/build-android-unsigned.py": "22fa78bef8cb86aad9aad98b6f870b2e9491dc3bef1433eb462e0e9ced5a4041",
+    "scripts/check-app-review-wiring.py": "62b5b52bcc75e0774b0469737e0b025612e04748434a902ea02d564de4627d47",
+    "scripts/check-export-wiring.py": "8974f5d7d7c2b702ff3bcb0fae313cc6dd172f7f8130a48141bc420bed91de78",
+    "scripts/check-ftps-wiring.py": "7574c54a001c4d63db54ee008c6e7d3603d9e6938eef54b0ce5d97703b8c485d",
+    "scripts/check-java8-buffer-linkage.py": "327d7632a0a26bc5d7c86c761ed5e60e99e9923c8cc1f58ec13a11ad20194189",
+    "scripts/reproduce-app-review-baseline.py": "ca065a8bbc1210c048affb43fde23bef38c106ad9e819bc30ca5a481bdda4226",
+    "scripts/run-export-checks.py": "5fb5251ace54677e6a33d80a16bc08d434cc9cb09a6afaf5f875b4f99cbcbd66",
+    "scripts/run-ftps-checks.py": "c6a02f2a89e0c3ff3215caf81c816f68bf53300fe8f792b296af278d2f62d6bb",
+    "scripts/test-app-review.sh": "d7b61310d251f78c698b8af777047dc571bd7569e96d653cc03ac89242f82465",
+    "scripts/test-app-safety.sh": "df12669b4255b198f08d2970584e06085c1247f92333ba4c226f825a91107253",
+    "scripts/test-core-adversarial.sh": "5a0afdfcba703cb6c292b9b7be7d1ec23ea6be8591604bec12936a25014f8967",
+    "scripts/test-core.sh": "057a419757a1473a5b6e5d40dbc60c25ae20329cf550dc39c3f3cb47b90a8a39",
+    "scripts/test-export.sh": "418d94bfca42faafbe4feaa763041da0b5444238853e2359e8b3df491ca16174",
+    "scripts/test-ftps-queue-sql.py": "c92f6676a56be48fb610dcaea4ea6d3bd2704afe31099da3c926e4f325f8361a",
+    "scripts/test-ftps.sh": "396f42dd27a61444744b727557a18ea9ad7decf43c5afa74daacddb8c9408daf",
+    "scripts/test-storage-adversarial.sh": "be51359da25e041f899e72f9df359d83eed88e79b3aba3415b198f0097734120",
+    "scripts/test-storage.sh": "693b5f0b5e6f91f9bb8c5b50d6dcdc53d1c2612f3991674dbe3dd6992655bbef"
+  },
+  "checks": [
+    {
+      "check": "ftps",
+      "command": [
+        "sh",
+        "scripts/test-ftps.sh"
+      ],
+      "exit_code": 0,
+      "tree_rss_peak_bytes": 114704384,
+      "seconds": 4.26,
+      "worktree_disk_bytes": 4100096,
+      "free_disk_bytes": 5495644160,
+      "log_sha256": "0ead6e360aac10c886bb8d3238999743b20c90e7c5d34c9cb3af21ade225b609",
+      "log_output": "PASS FTPS: 868 assertions; scripted transport only, no sockets/accounts/runtime acceptance\n"
+    },
+    {
+      "check": "queue-sql",
+      "command": [
+        "python",
+        "scripts/test-ftps-queue-sql.py"
+      ],
+      "exit_code": 0,
+      "tree_rss_peak_bytes": 13500416,
+      "seconds": 0.068,
+      "worktree_disk_bytes": 4100096,
+      "free_disk_bytes": 5495644160,
+      "log_sha256": "670c5113865975c1ce8b2432ae522b64da146184c9ff4b4fcc4f7028f589e921",
+      "log_output": "PASS: 19 host SQLite schema/recovery assertions, using production SQL; Java queue methods and Android durability/lifecycle untested\n"
+    },
+    {
+      "check": "export",
+      "command": [
+        "sh",
+        "scripts/test-export.sh"
+      ],
+      "exit_code": 0,
+      "tree_rss_peak_bytes": 113721344,
+      "seconds": 5.111,
+      "worktree_disk_bytes": 6492160,
+      "free_disk_bytes": 5493252096,
+      "log_sha256": "5f05bd475ff911191defd118df732875e7b7cd2add5535e853011d56b2ebaeb6",
+      "log_output": "PASS export: 301 assertions across streaming, target failures, mutation, allowlist, pagination, cancellation and single-flight/recreation model cases\nHost synthetic tests only. Android picker/grants/Activity/provider/process-death runtime remain untested.\n"
+    },
+    {
+      "check": "regressions",
+      "command": [
+        "sh",
+        "scripts/test-app-review.sh"
+      ],
+      "exit_code": 0,
+      "tree_rss_peak_bytes": 134959104,
+      "seconds": 6.254,
+      "worktree_disk_bytes": 7421952,
+      "free_disk_bytes": 5492322304,
+      "log_sha256": "dd1b2487657a119c0e6408ca115633f22695cdd4fd0a474e7b89638802a049ea",
+      "log_output": "PASS: 7068 deterministic assertions; Java policy core only\nPASS PCM exact arithmetic boundaries\nPASS epoch counter overflow preserves pending tail\nPASS invalid format transition is atomic\nPASS cache limits cannot overflow or evict\nPASS 16 trigger combinations\nPASS 4096 hard-gate combinations, including Upload now\nPASS 64 ANY/ALL, age-enable and manual/stop trigger combinations\nPASS concurrent reservation accounting and crash restoration\nPASS overrun snapshot remains persistable\nPASS observed counter overflow fails closed\nPASS already-in-flight overflow reconciliation returns false\nPASS all fourteen receipt identity/version fields reject substitutions\nPASS failed final recheck revokes delete eligibility\nPASS guard loss, identity mismatch, replacement and consumption\nIndependent review: 14 cases passed, 0 cases failed\nPASS: 389 WAV/storage assertions; synthetic local JVM fixtures only\nPASS arbitrary offset buffers preserve exact mono/stereo/32-channel frames\nPASS large input crosses both 8 KiB chunks and exact segment cuts\nPASS partial-frame epoch change preserves all bytes and becomes terminal\nPASS format changes start a new uncertain epoch\nPASS cache denial precedes payload growth\nPASS raw/full hashes and checksummed identity substitution\nPASS failure after actual rename requires recovery confirmation\nPASS new spool root requires durable parent reachability\nPASS unexpected partial entries are reported and preserved\nPASS parent-sync failure blocks admission and absent ancestors stay absent\nPASS interrupted manifests validate before conservative recovery reporting\nIndependent storage review: 11 cases passed, 0 cases failed\nPASS: 58 app-run safety helper assertions; no Android runtime/device execution\nPASS process boundary and one-shot resume consumption\nPASS stop/error revocation and invalid token input\nPASS concurrent callers cannot consume one pause twice\nPASS empty-queue in-flight failure plus held partial frame\nPASS accounting rejection is atomic and full drain clears warning\nPASS counter saturation cannot erase unconfirmed-data warning\nPASS read/ack accounting has no lost concurrent updates\nIndependent app-run review: 7 cases passed, 0 cases failed; no Android runtime/device execution\n"
+    },
+    {
+      "check": "app-wiring",
+      "command": [
+        "python",
+        "scripts/check-app-review-wiring.py"
+      ],
+      "exit_code": 0,
+      "tree_rss_peak_bytes": 18087936,
+      "seconds": 0.05,
+      "worktree_disk_bytes": 7421952,
+      "free_disk_bytes": 5492322304,
+      "log_sha256": "97559127d6f195e5804c3035fb0e97aca99719263577f0c689ed8efa73de9efe",
+      "log_output": "PASS source wiring: service resume authority comes only from the consumed process-local pause gate\nPASS source wiring: reads precede attribution, successful append acknowledgements follow writes, final warning follows producer join\nPASS source policy: explicit visible start, non-sticky service and no notification-dismissal stop/repost mechanism\nPASS current manifest: one launcher, private microphone service and system-permission-protected FTPS JobService; no provider/receiver/storage-wide permission\nThese source checks supplement logic tests; permission/lifecycle/notification behavior still requires a device.\n"
+    },
+    {
+      "check": "export-wiring",
+      "command": [
+        "python",
+        "scripts/check-export-wiring.py"
+      ],
+      "exit_code": 0,
+      "tree_rss_peak_bytes": 17956864,
+      "seconds": 0.051,
+      "worktree_disk_bytes": 7421952,
+      "free_disk_bytes": 5492322304,
+      "log_sha256": "cf244baf1c2d21176715ff6767024a17ff049e7362ff2573e684a0048315c934",
+      "log_output": "PASS export wiring: one-shot SAF document target, temporary grants, bounded worker, saved picker tickets, interruption marker and no deletion/retention handoff\nSource inspection only; Android lifecycle, provider behavior, screen UI and permission grants remain untested.\nPASS displayed-selection binding: UI page snapshot reaches the synchronized session identity guard\n"
+    },
+    {
+      "check": "ftps-wiring",
+      "command": [
+        "python",
+        "scripts/check-ftps-wiring.py"
+      ],
+      "exit_code": 0,
+      "tree_rss_peak_bytes": 18087936,
+      "seconds": 0.091,
+      "worktree_disk_bytes": 7421952,
+      "free_disk_bytes": 5492322304,
+      "log_sha256": "0153293b3e9af94acf2d9bd7a019a83a8f62ee279994da27fdb51c3d148ae159",
+      "log_output": "PASS FTPS source wiring: authenticated TLS flow, bound route, durable-before-I/O intent, exact source/profile admission, read-only reconciliation, explicit credential consent and no deletion\nNo Android/SQLite/credential/TLS/socket behavior was executed; device/runtime acceptance remains pending.\n"
+    },
+    {
+      "check": "buffer-linkage",
+      "command": [
+        "python",
+        "scripts/check-java8-buffer-linkage.py",
+        "app/build/app-review/classes"
+      ],
+      "exit_code": 0,
+      "tree_rss_peak_bytes": 18874368,
+      "seconds": 0.055,
+      "worktree_disk_bytes": 7421952,
+      "free_disk_bytes": 5492322304,
+      "log_sha256": "1ee34a77cf791b75c2982bcc30f2e235289f542adde9ad3d08b15644a58e5336",
+      "log_output": "PASS targeted Java-8 buffer linkage check; full platform compatibility remains unverified\n"
+    },
+    {
+      "check": "android-source-compile",
+      "command": [
+        "java",
+        "-Xmx48m",
+        "-XX:MaxMetaspaceSize=48m",
+        "-XX:ReservedCodeCacheSize=8m",
+        "-XX:+UseSerialGC",
+        "-XX:ActiveProcessorCount=1",
+        "-Xss256k",
+        "-m",
+        "jdk.compiler/com.sun.tools.javac.Main",
+        "-source",
+        "8",
+        "-target",
+        "8",
+        "-bootclasspath",
+        "$WORKSPACE/android-sdk-minimal/platforms/android-37.0/android.jar",
+        "-Xlint:all,-options",
+        "-d",
+        "$REPO/app/build/ftps-checks/android-classes",
+        "@$REPO/app/build/ftps-checks/android-sources.txt"
+      ],
+      "exit_code": 0,
+      "tree_rss_peak_bytes": 138452992,
+      "seconds": 5.211,
+      "worktree_disk_bytes": 7421952,
+      "free_disk_bytes": 5492322304,
+      "log_sha256": "d2a23c9edb4677fc6d316b66f715e4b7383971645c7a65146c3d268f9aea0ec4",
+      "log_output": "$REPO/app/src/main/java/io/github/headmaster218/recorder/android/FtpsNetwork.java:106: warning: [deprecation] getAllNetworks() in ConnectivityManager has been deprecated\n        for (Network candidate : cm.getAllNetworks()) {\n                                   ^\n$REPO/app/src/main/java/io/github/headmaster218/recorder/android/FtpsNetwork.java:207: warning: [deprecation] getInstance() in DnsResolver has been deprecated\n        DnsResolver.getInstance().query(network,host,DnsResolver.FLAG_EMPTY,context.getMainExecutor(),dnsCancellation,\n                   ^\n2 warnings\n"
+    }
+  ],
+  "initial_sdk_compile_failure_preserved": {
+    "path": "app/build/ftps-checks/initial-sdk-compile-failure.log",
+    "sha256": "69239e9d24726e730dbdb31a21d030ad8fbf64cf76c504fcc67dcda312b56618",
+    "resolved": "Removed non-public NetworkCapabilities.getTransportTypes; final official-SDK source compile passes."
+  },
+  "limits": {
+    "cpu": 6,
+    "nice": 19,
+    "tree_rss_limit_bytes": 268435456,
+    "worktree_limit_bytes": 12582912,
+    "free_disk_floor_bytes": 5368709120
+  },
+  "not_run": [
+    "TLS/socket/remote connections",
+    "Android runtime or device tests",
+    "actual credential/key APIs",
+    "permission grants",
+    "APK/dex/sign/install/publication",
+    "power-loss durability"
+  ],
+  "notes": [
+    "SQLite test executes production SQL in host SQLite, not Java queue methods.",
+    "Source wiring tests are textual contracts, not behavior acceptance.",
+    "Prior synthetic fixture copies were removed only from this feature app/build before final aggregate rerun; logs and source preserved."
+  ]
+}
