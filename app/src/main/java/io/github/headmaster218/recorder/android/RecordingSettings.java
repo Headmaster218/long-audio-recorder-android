@@ -11,6 +11,7 @@ final class RecordingSettings {
     final int rate, channels, seconds;
     final long cacheBytes, targetFrames;
     final PcmFormat format;
+    static RecordingSettings defaults() { return new RecordingSettings(16000,1,300,512); }
     RecordingSettings(int rate, int channels, int seconds, long cacheMiB) {
         if (rate < 8000 || rate > 96000 || (channels != 1 && channels != 2)
             || seconds < 1 || seconds > 3600 || cacheMiB < 16 || cacheMiB > 262144)
@@ -24,4 +25,26 @@ final class RecordingSettings {
     void put(Intent intent) { intent.putExtra("rate", rate).putExtra("channels", channels).putExtra("seconds", seconds).putExtra("cache_mib", cacheBytes / MIB); }
     static RecordingSettings from(Intent i) { return new RecordingSettings(i.getIntExtra("rate",16000),i.getIntExtra("channels",1),i.getIntExtra("seconds",300),i.getLongExtra("cache_mib",512)); }
     String requestedInput() { return "builtin-microphone;source=MIC;requested=" + rate + "Hz/" + channels + "ch/PCM16LE"; }
+
+    /** Process-local permission authority; never persisted or restored with UI state. */
+    static final class PendingStart {
+        private static int nextRequest = 16384; // Separate from FTPS LAN request 6201.
+        private int request;
+        private RecordingSettings snapshot;
+        private static synchronized int allocate() {
+            if (nextRequest > 65535) throw new IllegalStateException("Permission request limit reached. Restart the app before starting.");
+            return nextRequest++;
+        }
+        boolean waiting() { return snapshot != null; }
+        int begin(RecordingSettings settings) {
+            if (waiting()) throw new IllegalStateException("A microphone permission request is already pending.");
+            request = allocate(); snapshot = settings; return request;
+        }
+        boolean matches(int resultRequest) { return waiting() && request == resultRequest; }
+        RecordingSettings consume(int resultRequest) {
+            if (!matches(resultRequest)) return null;
+            RecordingSettings result = snapshot; cancel(); return result;
+        }
+        void cancel() { snapshot = null; request = 0; }
+    }
 }
