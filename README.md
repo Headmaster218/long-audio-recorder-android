@@ -1,3 +1,5 @@
+> Experimental unpublished recovery integration candidate: [status, finite tests, and device gates](docs/recovery-service-integration-draft.md). Recovery is default-off; no all-day/runtime qualification is claimed.
+
 # Android recorder
 
 Version: **0.1.0-dev7** (capture-observation source candidate; no dev7 APK or release).

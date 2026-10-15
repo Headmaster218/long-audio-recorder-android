@@ -13,6 +13,7 @@ import android.os.Looper;
 import android.text.InputType;
 import android.view.View;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -28,7 +29,8 @@ public final class MainActivity extends Activity {
     private ExportControls exports;
     private FtpsControls ftps;
     private Button start, pause, stop;
-    private boolean resumed;
+    private boolean resumed, pendingRecoveryOptIn;
+    private CheckBox recovery;
     private final RecordingSettings.PendingStart pending = new RecordingSettings.PendingStart();
     private RecordingSettingsStore settingsStore;
     private String localError;
@@ -73,6 +75,8 @@ public final class MainActivity extends Activity {
         button(column,"Save settings",new View.OnClickListener() { @Override public void onClick(View v) { saveSettings(); } });
         text(column,"Save stores only these four defaults. Start uses the displayed values without saving. Neither opening this screen nor saving starts recording. Saving never changes an active run.",14);
         text(column,"Requested input: built-in phone microphone. Hardware format may differ from the requested client PCM; both are reported. Unsupported client settings stop visibly.",15);
+        recovery = new CheckBox(this); recovery.setText("Experimental interruption recovery for the next session (off by default; up to 8 retries, 30 s maximum backoff)");
+        recovery.setChecked(false); recovery.setSaveEnabled(false); column.addView(recovery);
         start = button(column,"Start / resume",new View.OnClickListener() { @Override public void onClick(View v) { requestStart(); } });
         pause = button(column,"Pause",new View.OnClickListener() { @Override public void onClick(View v) { command(RecordingService.PAUSE); } });
         stop = button(column,"Stop",new View.OnClickListener() { @Override public void onClick(View v) { command(RecordingService.STOP); } });
@@ -102,6 +106,7 @@ public final class MainActivity extends Activity {
     private void requestStart() {
         if (!resumed || RecorderState.active || pending.waiting()) return;
         localError = null;
+        pendingRecoveryOptIn = recovery.isChecked();
         final RecordingSettings snapshot;
         try { snapshot = displayedSettings(); }
         catch (IllegalArgumentException e) { message(e.getMessage()); return; }
@@ -122,11 +127,12 @@ public final class MainActivity extends Activity {
         if (!resumed || snapshot == null || RecorderState.active) { message("Tap Start again while this screen is visible."); return; }
         if (!RecordingService.permissionsReady(this)) { message("Microphone and visible notifications are required. Enable them in Android settings, then tap Start."); return; }
         Intent i = new Intent(this,RecordingService.class).setAction(RecordingService.START); snapshot.put(i);
+        i.putExtra("recovery_opt_in",pendingRecoveryOptIn); pendingRecoveryOptIn = false; recovery.setChecked(false);
         try { startForegroundService(i); }
         catch (RuntimeException e) { message("Android rejected the foreground start: " + e.getClass().getSimpleName()); }
     }
     private void command(String action) {
-        pending.cancel();
+        pending.cancel(); pendingRecoveryOptIn = false;
         try { startService(new Intent(this,RecordingService.class).setAction(action)); }
         catch (RuntimeException e) { message("Could not send control: " + e.getClass().getSimpleName()); }
     }
@@ -140,7 +146,7 @@ public final class MainActivity extends Activity {
             else message("Recording has not started. Grant permissions and tap Start while the app is visible.");
         }
     }
-    @Override protected void onDestroy() { pending.cancel(); super.onDestroy(); }
+    @Override protected void onDestroy() { pending.cancel(); pendingRecoveryOptIn = false; super.onDestroy(); }
     @Override protected void onResume() { super.onResume(); resumed = true; main.post(refresh); }
     @Override protected void onPause() { resumed = false; main.removeCallbacks(refresh); super.onPause(); }
 }

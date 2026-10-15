@@ -1,3 +1,5 @@
+> Historical checkpoint description. This working candidate adds default-off service integration; see [current integration status](recovery-service-integration-draft.md) for executed checks and remaining limitations.
+
 # Surviving-service interruption controller: source draft
 
 Status: **UNEXECUTED and UNINTEGRATED**. Neither Java compilation nor host tests,

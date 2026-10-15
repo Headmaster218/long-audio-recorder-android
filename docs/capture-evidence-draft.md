@@ -1,3 +1,5 @@
+> Historical checkpoint description. This working candidate adds default-off service integration; see [current integration status](recovery-service-integration-draft.md) for executed checks and remaining limitations.
+
 # Capture completion evidence: source-only WIP
 
 Status: **UNEXECUTED, uncompiled, no Android/device validation.** This is a small

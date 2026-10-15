@@ -31,7 +31,10 @@ assert 'CaptureAnchors.ROUTE_UNCERTAIN | CaptureAnchors.CLOCK_REGRESSION' in s
 assert s.index('firstPcmEmitted = true;') < s.index('completion.firstPcm(this,first)')
 assert 'finished(engine,result,paused,nextEpoch);' in s
 service = Path('app/src/main/java/io/github/headmaster218/recorder/android/RecordingService.java').read_text()
-assert 'CaptureEvidence' not in service and 'InterruptionRecovery' not in service
+assert 'RecoveryGate.ownershipReleased(result)' in service and 'RecoveryGate.storageClosed(result)' in service
+assert 's.policy.acknowledgeGap(event)' in service and 'journal.persist(s.id,ordinal,record)' in service
+assert 's.policy.takeRetry(retry,authority(),now())' in service
+assert 's.policy.pause(now())' in service and 's.policy.stop(now())' in service
 assert 'START_NOT_STICKY' in service
 print('Capture evidence narrow source-order fixtures passed; no Android execution')
 PY

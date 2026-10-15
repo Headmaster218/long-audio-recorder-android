@@ -63,7 +63,7 @@ final class CaptureEngine implements Runnable {
     private final Context context;
     private final RecordingSettings settings;
     final String captureId;
-    private final String runId = UUID.randomUUID().toString();
+    final String runId = UUID.randomUUID().toString();
     private final boolean resumedCapture;
     private final Completion completion;
     private final CaptureEvidence evidence;
