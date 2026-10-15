@@ -17,10 +17,8 @@ import android.os.Looper;
 import java.util.UUID;
 import io.github.headmaster218.recorder.core.CleanPauseGate;
 import io.github.headmaster218.recorder.core.CaptureEvidence;
-import io.github.headmaster218.recorder.core.InterruptionRecovery;
-import io.github.headmaster218.recorder.core.PcmReadAccounting;
-import io.github.headmaster218.recorder.core.RecoveryGate;
 import io.github.headmaster218.recorder.core.RecoveryJournal;
+import io.github.headmaster218.recorder.core.RecoverySession;
 
 /** Explicit visible starts only. No boot receiver, sticky restart, background permission or upload work. */
 public final class RecordingService extends Service {
@@ -28,7 +26,6 @@ public final class RecordingService extends Service {
     private static final String CHANNEL = "visible-recording";
     private static final int NOTIFICATION = 10, RESULT_NOTIFICATION = 11;
     private final Handler main = new Handler(Looper.getMainLooper());
-    private CaptureEngine engine;
     private boolean foreground, destroyed;
     private NotificationManager notifications;
     @Override public void onCreate() {
@@ -45,41 +42,16 @@ public final class RecordingService extends Service {
     static boolean permissionsReady(Context c) {
         return c.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED && notificationsVisible(c);
     }
-    // Main-looper confined. Retained across service recreation until physical/storage/evidence gates clear.
-    // Process death relies on Android resource cleanup; this is not a cross-process lease or restart token.
-    private static Session heldSession;
-    private static final class Session {
-        final String id = UUID.randomUUID().toString(), captureId;
-        final RecordingSettings settings;
-        final InterruptionRecovery policy = new InterruptionRecovery(8,1000,30000);
-        InterruptionRecovery.Lease lease;
-        CaptureEngine engine;
-        CaptureEvidence.Result lastEvidence, pendingOutcome;
-        CaptureEvidence.FirstPcm first;
-        long nextEpoch;
-        int ordinal;
-        boolean resumed, writing, blocked, journalFailed, userPaused, historicalUncertainty, cleanPauseEligible;
-        String status = "Starting visible microphone service";
-        Runnable timer;
-        Session(RecordingSettings settings,String captureId,long epoch,boolean resumed) {
-            this.settings = settings; this.captureId = captureId; nextEpoch = epoch; this.resumed = resumed;
-        }
-    }
-    private Session session;
-    private boolean authority() { return !destroyed && foreground && permissionsReady(this); }
-    private static long now() { return android.os.SystemClock.elapsedRealtime(); }
+    // Main-looper confined. The process admission slot outlives a destroyed service object.
+    // It is not persisted and does not grant authority after process death or force-stop.
+    private static RecoverySession heldSession;
+    private RecoverySession session;
     @Override public int onStartCommand(Intent intent,int flags,int startId) {
         String action = intent == null ? "" : intent.getAction();
         if (START.equals(action)) startRequested(intent);
         else if (STOP.equals(action) || PAUSE.equals(action)) {
-            Session s = session;
-            if (s != null && heldSession == s) {
-                s.userPaused = PAUSE.equals(action);
-                if (s.userPaused) s.policy.pause(now()); else s.policy.stop(now());
-                cancelTimer(s);
-                if (s.engine != null) s.engine.requestStop(s.userPaused ? CaptureEngine.Stop.PAUSE : CaptureEngine.Stop.STOP);
-                s.status = "Stopping microphone and preserving queued PCM"; show(s);
-                pump(s);
+            if (session != null && heldSession == session) {
+                if (PAUSE.equals(action)) session.pause(); else session.stop();
             } else {
                 if (heldSession != null) RecorderState.status = "Previous session has unresolved ownership, storage or gap evidence; no new recorder started.";
                 else if (STOP.equals(action)) RecorderState.finish(this,"Stopped. Local recordings are preserved.",false,"",0);
@@ -96,7 +68,7 @@ public final class RecordingService extends Service {
         }
         String capture = UUID.randomUUID().toString(); long epoch = 0; boolean resume = false;
         try {
-            RecordingSettings settings = RecordingSettings.from(intent);
+            final RecordingSettings settings = RecordingSettings.from(intent);
             if (!permissionsReady(this)) throw new SecurityException("Microphone permission and visible notifications are required");
             CleanPauseGate.Resume cleanPause = RecorderState.takeCleanPause();
             if (cleanPause != null) {
@@ -105,151 +77,97 @@ public final class RecordingService extends Service {
             }
             startForeground(NOTIFICATION,notification("Starting microphone; local recording only",true),ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
             foreground = true; notifications.cancel(RESULT_NOTIFICATION);
-            Session s = new Session(settings,capture,epoch,resume);
-            s.lease = s.policy.explicitStart(intent.getBooleanExtra("recovery_opt_in",false),authority(),now());
-            if (s.lease == null) throw new IllegalStateException("Session start was not admitted");
-            session = s; heldSession = s;
+            final String captureId = capture;
+            final RecoverySession[] binding = new RecoverySession[1];
+            RecoverySession created = new RecoverySession(capture,epoch,resume,new RecoverySession.Host() {
+                @Override public long nowMillis() { return android.os.SystemClock.elapsedRealtime(); }
+                @Override public boolean authorized() {
+                    return session == binding[0] && heldSession == binding[0] && !destroyed && foreground && permissionsReady(RecordingService.this);
+                }
+                @Override public void post(Runnable work) { main.post(work); }
+                @Override public void postDelayed(Runnable work,long delay) { main.postDelayed(work,delay); }
+                @Override public void remove(Runnable work) { main.removeCallbacks(work); }
+                @Override public void status(String text) {
+                    if (heldSession != binding[0]) return;
+                    RecorderState.status = text;
+                    if (!destroyed && foreground && notificationsVisible(RecordingService.this)) notifications.notify(NOTIFICATION,notification(text,true));
+                }
+                @Override public void finished(String text,boolean paused,long nextEpoch,boolean admissionReleased) {
+                    if (heldSession != binding[0]) return;
+                    if (admissionReleased) {
+                        heldSession = null;
+                        if (session == binding[0]) session = null;
+                        RecorderState.finish(RecordingService.this,text,paused,captureId,nextEpoch);
+                    } else {
+                        RecorderState.active = true; // Admission blocked, not a claim that microphone capture is active.
+                        RecorderState.status = text;
+                    }
+                    if (foreground) { stopForeground(STOP_FOREGROUND_REMOVE); foreground = false; }
+                    if (!destroyed && notificationsVisible(RecordingService.this)) notifications.notify(RESULT_NOTIFICATION,notification(text,false));
+                    stopSelf();
+                }
+            },new RecoverySession.Engines() {
+                @Override public RecoverySession.Attempt create(String captureId,long nextEpoch,boolean resumed,RecoverySession.Events events) {
+                    return new AndroidAttempt(settings,captureId,nextEpoch,resumed,events);
+                }
+            },new RecoverySession.Journal() {
+                @Override public void persist(final String sessionId,final int ordinal,final String record,final RecoverySession.JournalCompletion completion) {
+                    final RecoveryJournal journal = new RecoveryJournal(getFilesDir().toPath().resolve("recovery-gaps"),new AndroidDirectoryProtocol(),
+                        new RecoveryJournal.Faults() { @Override public void before(RecoveryJournal.Step step) { } });
+                    new Thread(new Runnable() { @Override public void run() {
+                        String error = null; boolean historical = false;
+                        try { historical = journal.persist(sessionId,ordinal,record); }
+                        catch (Exception failure) { error = failure.getClass().getSimpleName() + ": " + failure.getMessage(); }
+                        completion.complete(historical,error);
+                    } },"recorder-gap-journal").start();
+                }
+            });
+            binding[0] = created; session = created; heldSession = created;
             RecorderState.starting(this,capture,epoch);
-            launch(s,s.lease);
+            if (!created.start(intent.getBooleanExtra("recovery_opt_in",false))) {
+                // No engine was admitted by the new session.
+                heldSession = null; session = null;
+                throw new IllegalStateException("Session start was not admitted");
+            }
         } catch (RuntimeException e) {
-            if (session != null) { session.blocked = true; session.policy.stop(now()); cancelTimer(session);
-                if (session.engine != null) session.engine.requestStop(CaptureEngine.Stop.INTERRUPTED);
-                session.status = "Start failed; session ownership needs inspection: " + e.getClass().getSimpleName(); show(session); pump(session); return; }
-            RecorderState.finish(this,"Recording did not start: " + e.getClass().getSimpleName() + ": " + e.getMessage(),false,capture,epoch);
-            if (foreground) { stopForeground(STOP_FOREGROUND_REMOVE); foreground = false; }
-            stopSelf();
-        }
-    }
-    private void launch(final Session s,final InterruptionRecovery.Lease lease) {
-        if (session != s || heldSession != s || s.engine != null || s.blocked || s.policy.snapshot().lease != lease || !authority()) {
-            s.policy.authorityLost(now()); s.policy.released(lease); pump(s); return;
-        }
-        final CaptureEngine created = new CaptureEngine(getApplicationContext(),s.settings,s.captureId,s.nextEpoch,s.resumed,new CaptureEngine.Completion() {
-            @Override public void finished(CaptureEngine ignored,String result,boolean paused,long nextEpoch) {
-                // This adapter always receives the typed overload; the legacy callback grants no ownership evidence.
-                throw new IllegalStateException("Typed completion evidence required");
+            if (session != null && heldSession == session) {
+                if (!session.abortBeforeStart()) {
+                    session.stop(); RecorderState.status = "Start failed; session cleanup needs inspection: " + e.getClass().getSimpleName(); return;
+                }
+                // Proven pre-admission failure, including state persistence or authority lookup failure.
+                heldSession = null; session = null;
             }
-            @Override public void firstPcm(final CaptureEngine engine,final CaptureEvidence.FirstPcm first) {
-                main.post(new Runnable() { @Override public void run() {
-                    if (session != s || heldSession != s || s.engine != engine || s.lease != lease || destroyed
-                        || !engine.captureId.equals(first.captureId) || !engine.runId.equals(first.runId)) return;
-                    if (!authority()) { loseAuthority(s); return; }
-                    if (s.policy.captureConfirmed(lease,now())) { s.first = first; s.status = "Recording visibly; recovery boundaries remain uncertain"; show(s); pump(s); }
-                } });
+            try {
+                RecorderState.finish(this,"Recording did not start: " + e.getClass().getSimpleName() + ": " + e.getMessage(),false,capture,epoch);
+            } finally {
+                if (foreground) { stopForeground(STOP_FOREGROUND_REMOVE); foreground = false; }
+                stopSelf();
             }
-            @Override public void finished(final CaptureEngine engine,final CaptureEvidence.Result evidence,final String result,final boolean paused,final long nextEpoch) {
-                main.post(new Runnable() { @Override public void run() { completed(s,lease,engine,evidence,result,paused,nextEpoch); } });
-            }
-        });
-        s.engine = created; engine = created;
-        try { new Thread(created,"recorder-storage").start(); }
-        catch (RuntimeException failure) {
-            // Fresh thread did not start: no engine run/producer/AudioRecord was invoked.
-            CaptureEvidence evidence = new CaptureEvidence(created.captureId,created.runId);
-            evidence.failed(CaptureEvidence.Failure.INITIALIZATION);
-            completed(s,lease,created,evidence.finish(new PcmReadAccounting().snapshot(),true),"Storage worker could not start",false,s.nextEpoch);
         }
     }
-    private void completed(Session s,InterruptionRecovery.Lease lease,CaptureEngine completed,CaptureEvidence.Result result,String text,boolean paused,long nextEpoch) {
-        if (heldSession != s || s.engine != completed || s.lease != lease
-            || !completed.captureId.equals(result.captureId) || !completed.runId.equals(result.runId)) return;
-        s.cleanPauseEligible = RecoveryGate.cleanPauseEligible(result,paused);
-        s.lastEvidence = result; s.pendingOutcome = result; s.first = null; s.nextEpoch = nextEpoch;
-        s.status = result.pcm.warning() + text;
-        InterruptionRecovery.Snapshot state = s.policy.snapshot();
-        if (state.state == InterruptionRecovery.State.STARTING || state.state == InterruptionRecovery.State.RUNNING) {
-            InterruptionRecovery.Reason reason = RecoveryGate.retryReason(result);
-            s.policy.interrupted(lease,reason == null ? InterruptionRecovery.Reason.UNKNOWN_FAILURE : reason,now());
+    /** Small platform attempt adapter; native capture ownership remains inside CaptureEngine. */
+    private final class AndroidAttempt implements RecoverySession.Attempt {
+        private final CaptureEngine engine;
+        AndroidAttempt(RecordingSettings settings,String captureId,long epoch,boolean resumed,final RecoverySession.Events events) {
+            engine = new CaptureEngine(getApplicationContext(),settings,captureId,epoch,resumed,new CaptureEngine.Completion() {
+                @Override public void finished(CaptureEngine ignored,String text,boolean paused,long nextEpoch) {
+                    throw new IllegalStateException("Typed completion evidence required");
+                }
+                @Override public void firstPcm(CaptureEngine completed,CaptureEvidence.FirstPcm first) {
+                    if (completed == engine) events.firstPcm(AndroidAttempt.this,first);
+                }
+                @Override public void finished(CaptureEngine completed,CaptureEvidence.Result result,String text,boolean paused,long nextEpoch) {
+                    if (completed == engine) events.finished(AndroidAttempt.this,result,text,paused,nextEpoch);
+                }
+            });
         }
-        if (RecoveryGate.ownershipReleased(result)) { s.policy.released(lease); s.engine = null; engine = null; }
-        else { s.blocked = true; s.status = "Physical microphone release is unconfirmed; no replacement recorder allowed. " + s.status;
-            if (result.producerTerminated) { s.engine = null; engine = null; } // Keep the process admission barrier, not a dead worker reference.
+        @Override public String captureId() { return engine.captureId; }
+        @Override public String runId() { return engine.runId; }
+        @Override public void start() { new Thread(engine,"recorder-storage").start(); }
+        @Override public void stop(RecoverySession.Stop reason) {
+            engine.requestStop(reason == RecoverySession.Stop.STOP ? CaptureEngine.Stop.STOP
+                : reason == RecoverySession.Stop.PAUSE ? CaptureEngine.Stop.PAUSE : CaptureEngine.Stop.INTERRUPTED);
         }
-        if (!RecoveryGate.storageClosed(result)) { s.blocked = true; s.status = "Storage closure is unconfirmed; files retained and restart blocked. " + s.status; }
-        if (s.blocked || nextEpoch == Long.MAX_VALUE) { s.policy.stop(now());
-            if (nextEpoch == Long.MAX_VALUE) { s.userPaused = false; s.status = "Capture epoch exhausted; explicit Start must create a new capture. " + s.status; }
-        }
-        if (destroyed || !authority()) s.policy.authorityLost(now());
-        s.userPaused = s.userPaused && paused;
-        show(s); pump(s);
-    }
-    private void cancelTimer(Session s) { if (s.timer != null) { main.removeCallbacks(s.timer); s.timer = null; } }
-    private void loseAuthority(Session s) {
-        s.policy.authorityLost(now()); cancelTimer(s);
-        if (s.engine != null) s.engine.requestStop(CaptureEngine.Stop.INTERRUPTED);
-        s.status = "Recovery stopped: foreground microphone authority or notification permission is unavailable.";
-        show(s); pump(s);
-    }
-    /** One bounded journal operation outstanding; admission waits for its exact completion. */
-    private void pump(final Session s) {
-        if (heldSession != s || s.writing) return;
-        if (s.journalFailed) { terminal(s); return; }
-        final CaptureEvidence.Result outcome = s.pendingOutcome;
-        final InterruptionRecovery.GapEvent event = outcome == null ? s.policy.peekGap() : null;
-        if (outcome != null || event != null) {
-            final String record = RecoveryJournal.encode(s.id,event,outcome == null ? s.lastEvidence : outcome,s.nextEpoch,s.first);
-            final int ordinal = s.ordinal; s.writing = true;
-            final RecoveryJournal journal = new RecoveryJournal(getFilesDir().toPath().resolve("recovery-gaps"),new AndroidDirectoryProtocol(),
-                new RecoveryJournal.Faults() { @Override public void before(RecoveryJournal.Step step) { } });
-            try { new Thread(new Runnable() { @Override public void run() {
-                String error = null; boolean historical = false;
-                try { historical = journal.persist(s.id,ordinal,record); } catch (Exception failure) { error = failure.getClass().getSimpleName() + ": " + failure.getMessage(); }
-                final String failure = error; final boolean historicalWarning = historical;
-                main.post(new Runnable() { @Override public void run() {
-                    if (heldSession != s) return;
-                    s.writing = false;
-                    if (failure != null) { journalFailed(s,failure); return; }
-                    s.historicalUncertainty |= historicalWarning;
-                    s.ordinal++;
-                    if (outcome != null && s.pendingOutcome == outcome) s.pendingOutcome = null;
-                    if (event != null && !s.policy.acknowledgeGap(event)) { journalFailed(s,"Gap acknowledgement identity mismatch"); return; }
-                    pump(s);
-                } });
-            } },"recorder-gap-journal").start(); }
-            catch (RuntimeException failure) { s.writing = false; journalFailed(s,"Journal worker could not start"); }
-            return;
-        }
-        if (s.engine != null) return;
-        InterruptionRecovery.Snapshot state = s.policy.snapshot();
-        if (!s.blocked && state.state == InterruptionRecovery.State.BACKOFF && state.retry != null) {
-            if (!authority()) { loseAuthority(s); return; }
-            if (s.timer != null) return;
-            final InterruptionRecovery.Retry retry = state.retry;
-            s.status = "Microphone interrupted. Waiting for bounded retry; prior PCM may have an uncertain gap. Stop/Pause cancels."; show(s);
-            s.timer = new Runnable() { @Override public void run() {
-                s.timer = null;
-                if (session != s || heldSession != s || s.blocked || s.writing || s.pendingOutcome != null || s.policy.peekGap() != null) return;
-                InterruptionRecovery.Lease next = s.policy.takeRetry(retry,authority(),now());
-                if (next == null) { pump(s); return; }
-                s.lease = next; s.resumed = true; launch(s,next);
-            } };
-            main.postDelayed(s.timer,Math.max(0,retry.dueMillis-now())); return;
-        }
-        terminal(s);
-    }
-    private void journalFailed(Session s,String error) {
-        s.journalFailed = true; s.blocked = true; s.policy.stop(now()); cancelTimer(s);
-        s.status = "Gap evidence could not be durably saved; recovery stopped and existing files retained. " + RecorderState.bounded(error);
-        if (s.engine != null) s.engine.requestStop(CaptureEngine.Stop.INTERRUPTED);
-        show(s); terminal(s);
-    }
-    private void show(Session s) {
-        RecorderState.status = RecorderState.bounded((s.historicalUncertainty ? "Historical partial/unknown gap records remain; past gap coverage is incomplete. " : "") + s.status);
-        if (!destroyed && foreground && notificationsVisible(this)) notifications.notify(NOTIFICATION,notification(RecorderState.status,true));
-    }
-    private void terminal(Session s) {
-        if (s.engine != null || s.writing) return;
-        cancelTimer(s);
-        if (!s.blocked && !s.journalFailed && s.pendingOutcome == null && s.policy.peekGap() == null) {
-            heldSession = null; session = null;
-            RecorderState.finish(this,(s.historicalUncertainty ? "Historical partial/unknown gap records remain; past gap coverage is incomplete. " : "") + s.status,s.userPaused && s.cleanPauseEligible,s.captureId,s.nextEpoch);
-        } else {
-            RecorderState.active = true; // Admission blocked, not a claim that the microphone is recording.
-            RecorderState.status = RecorderState.bounded((s.historicalUncertainty ? "Historical partial/unknown gap records remain; past gap coverage is incomplete. " : "") + s.status);
-        }
-        if (foreground) { stopForeground(STOP_FOREGROUND_REMOVE); foreground = false; }
-        if (!destroyed && notificationsVisible(this)) notifications.notify(RESULT_NOTIFICATION,notification(s.status,false));
-        stopSelf();
     }
     private Notification notification(String message,boolean ongoing) {
         PendingIntent open = PendingIntent.getActivity(this,1,new Intent(this,MainActivity.class),PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
@@ -266,6 +184,6 @@ public final class RecordingService extends Service {
         } else b.setAutoCancel(true);
         return b.build();
     }
-    @Override public void onDestroy() { destroyed = true; if (session != null && heldSession == session) { cancelTimer(session); session.policy.authorityLost(now()); if (session.engine != null) session.engine.requestStop(CaptureEngine.Stop.INTERRUPTED); pump(session); } super.onDestroy(); }
+    @Override public void onDestroy() { destroyed = true; if (session != null && heldSession == session) session.destroy(); super.onDestroy(); }
     @Override public IBinder onBind(Intent intent) { return null; }
 }

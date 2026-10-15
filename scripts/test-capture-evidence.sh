@@ -31,10 +31,15 @@ assert 'CaptureAnchors.ROUTE_UNCERTAIN | CaptureAnchors.CLOCK_REGRESSION' in s
 assert s.index('firstPcmEmitted = true;') < s.index('completion.firstPcm(this,first)')
 assert 'finished(engine,result,paused,nextEpoch);' in s
 service = Path('app/src/main/java/io/github/headmaster218/recorder/android/RecordingService.java').read_text()
-assert 'RecoveryGate.ownershipReleased(result)' in service and 'RecoveryGate.storageClosed(result)' in service
-assert 's.policy.acknowledgeGap(event)' in service and 'journal.persist(s.id,ordinal,record)' in service
-assert 's.policy.takeRetry(retry,authority(),now())' in service
-assert 's.policy.pause(now())' in service and 's.policy.stop(now())' in service
+coordinator = Path('app/src/main/java/io/github/headmaster218/recorder/core/RecoverySession.java').read_text()
+assert 'RecoveryGate.ownershipReleased(result)' in coordinator and 'RecoveryGate.storageClosed(result)' in coordinator
+assert 'policy.acknowledgeGap(operation.event)' in coordinator and 'journal.persist(id,ordinal,record' in coordinator
+assert 'policy.takeRetry(retry,authority(),now())' in coordinator
+assert 'policy.pause(now())' in coordinator and 'policy.stop(now())' in coordinator
+assert 'writing!=operation' in coordinator and 'timer!=this' in coordinator
+assert 'events.finished(AndroidAttempt.this,result,text,paused,nextEpoch)' in service
+assert 'session.pause()' in service and 'session.stop()' in service and 'session.destroy()' in service
+assert 'private static RecoverySession heldSession' in service
 assert 'START_NOT_STICKY' in service
 print('Capture evidence narrow source-order fixtures passed; no Android execution')
 PY

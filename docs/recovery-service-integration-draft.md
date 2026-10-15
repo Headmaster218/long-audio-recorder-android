@@ -1,6 +1,6 @@
 # Experimental surviving-service recovery integration
 
-Unpublished source candidate based on `86c2fc3b10ee9366076d5a20361bb52694ae23de`.
+Development refactor based on dev8 commit `5bb28581cd4fd9e8a2c5362bd9aab5050189d0a4`.
 It compiles against official Android 37.0 and has finite host tests. Android
 Service/Handler/AudioRecord execution, installation and real-device acceptance
 remain untested. No continuous/all-day recording claim or release is made.
@@ -66,6 +66,35 @@ bounded by the directory total and are not parsed as trustworthy history. This i
 not comprehensive validation/reconciliation of every historical ready record.
 Same-target replay is idempotent only for exact bytes and successful directory sync.
 
+## Production session ordering seam
+
+`RecoverySession` now owns the same session/policy/evidence pump formerly nested
+in `RecordingService`. Its three ports are Host (main lane, time, authority and
+status), Engines (one attempt plus typed callbacks), and Journal (durable result).
+The Android service still owns foreground/permission checks, the process admission
+slot, native CaptureEngine construction, Handler callbacks and filesystem dispatch.
+No synthetic Android framework or alternate test-only recovery algorithm is used.
+
+The extraction preserves retry limits, gate policy, journal order, pause intent
+and process-local admission. It additionally fences journal completion by exact
+write-object identity and timers by exact Runnable identity; duplicate/stale
+callbacks cannot acknowledge a newer write or clear a newer timer. Completion
+notifies once. A proven never-started session can be aborted before admission;
+this handles state-persistence or authority-query failure without stranding the
+foreground service. Once start has admitted an attempt, this shortcut refuses to
+release admission. Engine factory failure retains the conservative blocked state.
+The Attempt.start RuntimeException contract applies only to a fresh worker that
+never started and acquired no recorder, as in the Android Thread.start adapter.
+
+`scripts/test-recovery-session.sh` passes 325 deterministic host assertions against
+this production coordinator: Stop/Pause around first PCM, journal and backoff;
+Pause then Stop before clean-result persistence; stale engine/write/timer events;
+early timers; synchronous journal/start/factory failures; invalid identities;
+pre-admission abort and authority exceptions; destruction while active, journaling,
+or retrying; finite PCM uncertainty and physical/storage uncertainty. These execute
+production orchestration with queued port callbacks, not Android Handler/Service,
+AudioRecord, actual permissions, or filesystem durability.
+
 ## Verification and remaining gates
 
 `scripts/test-recovery-integration.sh` passes 656 finite host assertions covering
@@ -84,8 +113,8 @@ These tests do not execute the Android service event loop. Historical exact-sour
 projection checks still need explicit review/rebaselining; no aggregate release
 gate is claimed.
 
-Before enabling by default or distributing: independent source review; executable
-service/worker ordering fixtures; platform permission/visibility/route tests;
+Before enabling by default or distributing: platform permission/visibility/route
+tests and actual service/worker lifecycle execution;
 Stop/Pause during creation, active read, journal write and retry; system task-manager
 Stop, force-stop, process death/reboot; locked-screen/Doze and actual phone/VoIP
 contention; on-device storage durability and long-run thermal/battery qualification.
@@ -100,7 +129,8 @@ Official constraints:
 ## Reproduce the source compilation without publishing SDK files
 
 Development source metadata is 0.1.0-dev8 / versionCode 8 in VERSION, Gradle and
-the direct-build manifest. No new installable APK accompanies this checkpoint. The earlier pinned capture checkpoint's
+the direct-build manifest. The dev8 base also passed a local unsigned package build; no signed or installed
+APK accompanies this source checkpoint. The earlier pinned capture checkpoint's
 full-source compile and focused tests are separate from this modified candidate.
 
 Official metadata: https://dl.google.com/android/repository/repository2-3.xml
