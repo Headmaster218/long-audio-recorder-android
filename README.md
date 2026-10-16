@@ -127,3 +127,7 @@ Run `python scripts/run-ftps-checks.py` for bounded, offline host/source checks.
 The optional official-SDK source compilation requires `--sdk` and
 `--resource-java` pointing to existing inputs; it downloads nothing and creates
 no APK. See [FTPS limits and evidence](docs/ftps-transfer.md) before testing.
+
+### Real FTPS/TLS loopback acceptance
+
+The [nine-scenario loopback fixture](docs/ftps-loopback-integration.md) passed against unchanged dev13 production FTPS classes, including strict certificate/hostname rejection, full readback and same-attempt recovery. This test-only checkpoint keeps app version dev13 and does not qualify Android device networking or all-day operation.

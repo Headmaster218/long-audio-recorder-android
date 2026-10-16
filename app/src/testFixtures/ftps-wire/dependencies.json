@@ -1,0 +1,13 @@
+{
+  "source": "Official PyPI release metadata, checked 2026-10-16",
+  "download_limit_bytes": 2097152,
+  "install_limit_bytes": 16777216,
+  "packages": [
+    {"name":"pyftpdlib","version":"2.2.0","license":"MIT","filename":"pyftpdlib-2.2.0.tar.gz","size":189150,"sha256":"4ba0642078792df63dd3b2e9c8f838f2a3ecf428c7518d5921c0530d53512acf","url":"https://files.pythonhosted.org/packages/f9/42/8751c5f58ae59b09e070da4fa322ae9693a340d2cc456b5a380b2c1ee47a/pyftpdlib-2.2.0.tar.gz"},
+    {"name":"pyOpenSSL","version":"26.4.0","license":"Apache-2.0","filename":"pyopenssl-26.4.0-py3-none-any.whl","size":56026,"sha256":"f0eb0cb2d581d3ad2b9c489468485e7f2ab6727d08401bcf9d824c3caddf3c1c","url":"https://files.pythonhosted.org/packages/51/ad/2cf6d3fa2fae5c79e1ed9960c0d42badd0f94d81dd12b50604cdc839e648/pyopenssl-26.4.0-py3-none-any.whl"},
+    {"name":"pyasyncore","version":"1.0.5","license":"PSF-2.0","filename":"pyasyncore-1.0.5-py3-none-any.whl","size":10237,"sha256":"269bbc5252671827387636822841a1fb721ec6e858b23a3e12cf92eb1f97da2a","url":"https://files.pythonhosted.org/packages/1f/ab/b10cee56269ae150763f3f83b3e9305a11f42f50b3dcd58eeb8f7988f0bb/pyasyncore-1.0.5-py3-none-any.whl"},
+    {"name":"pyasynchat","version":"1.0.5","license":"PSF-2.0","filename":"pyasynchat-1.0.5-py3-none-any.whl","size":7869,"sha256":"35b7859515693e479e8d95ebe9f32cbf4d6312ab7599ced39fc24699e51de46f","url":"https://files.pythonhosted.org/packages/48/e8/e5ad498cb6a834c16af910e259926fd545dd7873a2da451f3a2bb228d7ee/pyasynchat-1.0.5-py3-none-any.whl"}
+  ],
+  "reused_runtime": {"python":"3.12.14","cryptography":"50.0.0","cffi":"2.1.1","typing_extensions":"4.16.0","setuptools":"84.0.0","wheel":"0.48.0"},
+  "notes":"Fixture-only; never installed into system Python or Android app. No credentials or private keys in this manifest."
+}

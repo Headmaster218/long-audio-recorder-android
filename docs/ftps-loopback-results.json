@@ -1,0 +1,1206 @@
+{
+  "base_commit": "8edff98955655350e5af6b2d8b4ccdf4cb89fd9b",
+  "test_only": true,
+  "production_changes": false,
+  "executed_utc": "2026-10-16T14:43:35Z",
+  "seconds": 18.686,
+  "peak_process_tree_rss": 147025920,
+  "raw_report_sha256": "dda8dc54ecb2351c7fa467fb46f0131c81fd2b589a41ada8de0787517947fd1e",
+  "ephemeral_keys_removed": true,
+  "dependencies": {
+    "source": "Official PyPI release metadata, checked 2026-10-16",
+    "download_limit_bytes": 2097152,
+    "install_limit_bytes": 16777216,
+    "packages": [
+      {
+        "name": "pyftpdlib",
+        "version": "2.2.0",
+        "license": "MIT",
+        "filename": "pyftpdlib-2.2.0.tar.gz",
+        "size": 189150,
+        "sha256": "4ba0642078792df63dd3b2e9c8f838f2a3ecf428c7518d5921c0530d53512acf",
+        "url": "https://files.pythonhosted.org/packages/f9/42/8751c5f58ae59b09e070da4fa322ae9693a340d2cc456b5a380b2c1ee47a/pyftpdlib-2.2.0.tar.gz"
+      },
+      {
+        "name": "pyOpenSSL",
+        "version": "26.4.0",
+        "license": "Apache-2.0",
+        "filename": "pyopenssl-26.4.0-py3-none-any.whl",
+        "size": 56026,
+        "sha256": "f0eb0cb2d581d3ad2b9c489468485e7f2ab6727d08401bcf9d824c3caddf3c1c",
+        "url": "https://files.pythonhosted.org/packages/51/ad/2cf6d3fa2fae5c79e1ed9960c0d42badd0f94d81dd12b50604cdc839e648/pyopenssl-26.4.0-py3-none-any.whl"
+      },
+      {
+        "name": "pyasyncore",
+        "version": "1.0.5",
+        "license": "PSF-2.0",
+        "filename": "pyasyncore-1.0.5-py3-none-any.whl",
+        "size": 10237,
+        "sha256": "269bbc5252671827387636822841a1fb721ec6e858b23a3e12cf92eb1f97da2a",
+        "url": "https://files.pythonhosted.org/packages/1f/ab/b10cee56269ae150763f3f83b3e9305a11f42f50b3dcd58eeb8f7988f0bb/pyasyncore-1.0.5-py3-none-any.whl"
+      },
+      {
+        "name": "pyasynchat",
+        "version": "1.0.5",
+        "license": "PSF-2.0",
+        "filename": "pyasynchat-1.0.5-py3-none-any.whl",
+        "size": 7869,
+        "sha256": "35b7859515693e479e8d95ebe9f32cbf4d6312ab7599ced39fc24699e51de46f",
+        "url": "https://files.pythonhosted.org/packages/48/e8/e5ad498cb6a834c16af910e259926fd545dd7873a2da451f3a2bb228d7ee/pyasynchat-1.0.5-py3-none-any.whl"
+      }
+    ],
+    "reused_runtime": {
+      "python": "3.12.14",
+      "cryptography": "50.0.0",
+      "cffi": "2.1.1",
+      "typing_extensions": "4.16.0",
+      "setuptools": "84.0.0",
+      "wheel": "0.48.0"
+    },
+    "notes": "Fixture-only; never installed into system Python or Android app. No credentials or private keys in this manifest."
+  },
+  "limitations": "Real JVM sockets/TLS and production FTPS classes; Android routing/trust provider/lifecycle and automatic cleanup coordinator are not executed.",
+  "scenarios": [
+    {
+      "scenario": "success",
+      "seconds": 2.135,
+      "client": {
+        "scenario": "success",
+        "status": "verified",
+        "attempt": "r-171adf282804c9578fd662439abee020a7b863c82a344f64f08539abe4f6b431-dc710d76525e41639a16e04b8824a77e",
+        "remote_directory": "/fixture/r-171adf282804c9578fd662439abee020a7b863c82a344f64f08539abe4f6b431-dc710d76525e41639a16e04b8824a77e",
+        "source_id": "segment-a337a39a84c881cc9fce44c21605675246fda7d22045ff1621f792739da11a86-0.ready",
+        "source_bytes": 16428,
+        "source_hash_before": "b060690a88c5afb4b32056d1bb3086d3ea694b8f682e733896e24fc642c6980a",
+        "source_hash_after": "b060690a88c5afb4b32056d1bb3086d3ea694b8f682e733896e24fc642c6980a",
+        "local_unchanged": true,
+        "cleanup_invoked": false,
+        "attempt_count": 1,
+        "first_failed": false,
+        "first_error_class": null,
+        "reconcile_only": false,
+        "reconcile_failed": false,
+        "raw_sockets_created": 10,
+        "raw_connections_made": 10,
+        "all_raw_sockets_closed": true,
+        "callback_registrations": 1,
+        "callback_unregistrations": 1,
+        "cancel_fired": false,
+        "closed_at_cancel": false,
+        "first_elapsed_ms": 1645,
+        "cancel_return_ms": -1,
+        "result": {
+          "verified_at_time": true,
+          "bytes": 16428,
+          "wav_sha256": "b060690a88c5afb4b32056d1bb3086d3ea694b8f682e733896e24fc642c6980a",
+          "metadata_sha256": "00d30bd5587fd86d2ab47e20c86dd979098963550a16fa76fc08382c6b497df4",
+          "marker_sha256": "3a4ad08ec2102ed3716bff56060966cbe9a327aa78f49067794a22ea8dfd49c8"
+        }
+      },
+      "server": {
+        "sessions": 1,
+        "control_tls": 1,
+        "data_tls": 9,
+        "data_bytes": 51615,
+        "fault": false,
+        "all_closed": true,
+        "errors": [],
+        "commands": [
+          {
+            "session": 1,
+            "cmd": "AUTH",
+            "tls": false
+          },
+          {
+            "session": 1,
+            "cmd": "USER",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "PASS",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "PBSZ",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "PROT",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "TYPE",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "CWD",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "MKD",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "CWD",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "EPSV",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "STOR",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "EPSV",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "RETR",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "EPSV",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "STOR",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "EPSV",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "RETR",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "EPSV",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "STOR",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "EPSV",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "RETR",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "EPSV",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "RETR",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "EPSV",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "RETR",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "EPSV",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "RETR",
+            "tls": true
+          }
+        ],
+        "remote_files": {
+          "fixture/r-171adf282804c9578fd662439abee020a7b863c82a344f64f08539abe4f6b431-dc710d76525e41639a16e04b8824a77e/segment.v1.bin": {
+            "size": 419,
+            "sha256": "00d30bd5587fd86d2ab47e20c86dd979098963550a16fa76fc08382c6b497df4"
+          },
+          "fixture/r-171adf282804c9578fd662439abee020a7b863c82a344f64f08539abe4f6b431-dc710d76525e41639a16e04b8824a77e/delivery.v1.txt": {
+            "size": 358,
+            "sha256": "3a4ad08ec2102ed3716bff56060966cbe9a327aa78f49067794a22ea8dfd49c8"
+          },
+          "fixture/r-171adf282804c9578fd662439abee020a7b863c82a344f64f08539abe4f6b431-dc710d76525e41639a16e04b8824a77e/audio.wav": {
+            "size": 16428,
+            "sha256": "b060690a88c5afb4b32056d1bb3086d3ea694b8f682e733896e24fc642c6980a"
+          }
+        }
+      }
+    },
+    {
+      "scenario": "untrusted_control",
+      "seconds": 1.172,
+      "client": {
+        "scenario": "untrusted_control",
+        "status": "expected_failure",
+        "attempt": "r-171adf282804c9578fd662439abee020a7b863c82a344f64f08539abe4f6b431-4c572b66b7124c2581094c22fd16b40b",
+        "remote_directory": "/fixture/r-171adf282804c9578fd662439abee020a7b863c82a344f64f08539abe4f6b431-4c572b66b7124c2581094c22fd16b40b",
+        "source_id": "segment-a337a39a84c881cc9fce44c21605675246fda7d22045ff1621f792739da11a86-0.ready",
+        "source_bytes": 16428,
+        "source_hash_before": "b060690a88c5afb4b32056d1bb3086d3ea694b8f682e733896e24fc642c6980a",
+        "source_hash_after": "b060690a88c5afb4b32056d1bb3086d3ea694b8f682e733896e24fc642c6980a",
+        "local_unchanged": true,
+        "cleanup_invoked": false,
+        "attempt_count": 1,
+        "first_failed": true,
+        "first_error_class": "javax.net.ssl.SSLHandshakeException",
+        "reconcile_only": false,
+        "reconcile_failed": false,
+        "raw_sockets_created": 1,
+        "raw_connections_made": 1,
+        "all_raw_sockets_closed": true,
+        "callback_registrations": 1,
+        "callback_unregistrations": 1,
+        "cancel_fired": false,
+        "closed_at_cancel": false,
+        "first_elapsed_ms": 728,
+        "cancel_return_ms": -1,
+        "result": null
+      },
+      "server": {
+        "sessions": 1,
+        "control_tls": 0,
+        "data_tls": 0,
+        "data_bytes": 0,
+        "fault": false,
+        "all_closed": true,
+        "errors": [],
+        "commands": [
+          {
+            "session": 1,
+            "cmd": "AUTH",
+            "tls": false
+          }
+        ],
+        "remote_files": {}
+      }
+    },
+    {
+      "scenario": "wrong_host_control",
+      "seconds": 1.278,
+      "client": {
+        "scenario": "wrong_host_control",
+        "status": "expected_failure",
+        "attempt": "r-171adf282804c9578fd662439abee020a7b863c82a344f64f08539abe4f6b431-0de27dbcee1047a1ad181769d7135597",
+        "remote_directory": "/fixture/r-171adf282804c9578fd662439abee020a7b863c82a344f64f08539abe4f6b431-0de27dbcee1047a1ad181769d7135597",
+        "source_id": "segment-a337a39a84c881cc9fce44c21605675246fda7d22045ff1621f792739da11a86-0.ready",
+        "source_bytes": 16428,
+        "source_hash_before": "b060690a88c5afb4b32056d1bb3086d3ea694b8f682e733896e24fc642c6980a",
+        "source_hash_after": "b060690a88c5afb4b32056d1bb3086d3ea694b8f682e733896e24fc642c6980a",
+        "local_unchanged": true,
+        "cleanup_invoked": false,
+        "attempt_count": 1,
+        "first_failed": true,
+        "first_error_class": "javax.net.ssl.SSLHandshakeException",
+        "reconcile_only": false,
+        "reconcile_failed": false,
+        "raw_sockets_created": 1,
+        "raw_connections_made": 1,
+        "all_raw_sockets_closed": true,
+        "callback_registrations": 1,
+        "callback_unregistrations": 1,
+        "cancel_fired": false,
+        "closed_at_cancel": false,
+        "first_elapsed_ms": 833,
+        "cancel_return_ms": -1,
+        "result": null
+      },
+      "server": {
+        "sessions": 1,
+        "control_tls": 0,
+        "data_tls": 0,
+        "data_bytes": 0,
+        "fault": false,
+        "all_closed": true,
+        "errors": [],
+        "commands": [
+          {
+            "session": 1,
+            "cmd": "AUTH",
+            "tls": false
+          }
+        ],
+        "remote_files": {}
+      }
+    },
+    {
+      "scenario": "wrong_data_cert",
+      "seconds": 1.445,
+      "client": {
+        "scenario": "wrong_data_cert",
+        "status": "expected_failure",
+        "attempt": "r-171adf282804c9578fd662439abee020a7b863c82a344f64f08539abe4f6b431-e0c3704dc1d34a658262893d258affa7",
+        "remote_directory": "/fixture/r-171adf282804c9578fd662439abee020a7b863c82a344f64f08539abe4f6b431-e0c3704dc1d34a658262893d258affa7",
+        "source_id": "segment-a337a39a84c881cc9fce44c21605675246fda7d22045ff1621f792739da11a86-0.ready",
+        "source_bytes": 16428,
+        "source_hash_before": "b060690a88c5afb4b32056d1bb3086d3ea694b8f682e733896e24fc642c6980a",
+        "source_hash_after": "b060690a88c5afb4b32056d1bb3086d3ea694b8f682e733896e24fc642c6980a",
+        "local_unchanged": true,
+        "cleanup_invoked": false,
+        "attempt_count": 1,
+        "first_failed": true,
+        "first_error_class": "javax.net.ssl.SSLHandshakeException",
+        "reconcile_only": false,
+        "reconcile_failed": false,
+        "raw_sockets_created": 2,
+        "raw_connections_made": 2,
+        "all_raw_sockets_closed": true,
+        "callback_registrations": 1,
+        "callback_unregistrations": 1,
+        "cancel_fired": false,
+        "closed_at_cancel": false,
+        "first_elapsed_ms": 1050,
+        "cancel_return_ms": -1,
+        "result": null
+      },
+      "server": {
+        "sessions": 1,
+        "control_tls": 1,
+        "data_tls": 0,
+        "data_bytes": 0,
+        "fault": false,
+        "all_closed": true,
+        "errors": [],
+        "commands": [
+          {
+            "session": 1,
+            "cmd": "AUTH",
+            "tls": false
+          },
+          {
+            "session": 1,
+            "cmd": "USER",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "PASS",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "PBSZ",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "PROT",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "TYPE",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "CWD",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "MKD",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "CWD",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "EPSV",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "STOR",
+            "tls": true
+          }
+        ],
+        "remote_files": {
+          "fixture/r-171adf282804c9578fd662439abee020a7b863c82a344f64f08539abe4f6b431-e0c3704dc1d34a658262893d258affa7/audio.wav": {
+            "size": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      }
+    },
+    {
+      "scenario": "corrupt_readback",
+      "seconds": 1.777,
+      "client": {
+        "scenario": "corrupt_readback",
+        "status": "expected_failure",
+        "attempt": "r-171adf282804c9578fd662439abee020a7b863c82a344f64f08539abe4f6b431-70d284a040614c55966a1b80e58e75d3",
+        "remote_directory": "/fixture/r-171adf282804c9578fd662439abee020a7b863c82a344f64f08539abe4f6b431-70d284a040614c55966a1b80e58e75d3",
+        "source_id": "segment-a337a39a84c881cc9fce44c21605675246fda7d22045ff1621f792739da11a86-0.ready",
+        "source_bytes": 16428,
+        "source_hash_before": "b060690a88c5afb4b32056d1bb3086d3ea694b8f682e733896e24fc642c6980a",
+        "source_hash_after": "b060690a88c5afb4b32056d1bb3086d3ea694b8f682e733896e24fc642c6980a",
+        "local_unchanged": true,
+        "cleanup_invoked": false,
+        "attempt_count": 1,
+        "first_failed": true,
+        "first_error_class": "io.github.headmaster218.recorder.core.FtpsTransfer$VerificationException",
+        "reconcile_only": false,
+        "reconcile_failed": false,
+        "raw_sockets_created": 3,
+        "raw_connections_made": 3,
+        "all_raw_sockets_closed": true,
+        "callback_registrations": 1,
+        "callback_unregistrations": 1,
+        "cancel_fired": false,
+        "closed_at_cancel": false,
+        "first_elapsed_ms": 1298,
+        "cancel_return_ms": -1,
+        "result": null
+      },
+      "server": {
+        "sessions": 1,
+        "control_tls": 1,
+        "data_tls": 2,
+        "data_bytes": 32856,
+        "fault": true,
+        "all_closed": true,
+        "errors": [],
+        "commands": [
+          {
+            "session": 1,
+            "cmd": "AUTH",
+            "tls": false
+          },
+          {
+            "session": 1,
+            "cmd": "USER",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "PASS",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "PBSZ",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "PROT",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "TYPE",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "CWD",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "MKD",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "CWD",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "EPSV",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "STOR",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "EPSV",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "RETR",
+            "tls": true
+          }
+        ],
+        "remote_files": {
+          "fixture/r-171adf282804c9578fd662439abee020a7b863c82a344f64f08539abe4f6b431-70d284a040614c55966a1b80e58e75d3/audio.wav": {
+            "size": 16428,
+            "sha256": "cfd600d008518f99d4d0b9df923a9f447746788de75a3d0a2c59c094089b811f"
+          }
+        }
+      }
+    },
+    {
+      "scenario": "truncated_readback",
+      "seconds": 1.683,
+      "client": {
+        "scenario": "truncated_readback",
+        "status": "expected_failure",
+        "attempt": "r-171adf282804c9578fd662439abee020a7b863c82a344f64f08539abe4f6b431-45662b3e95014acb903db631517d0c54",
+        "remote_directory": "/fixture/r-171adf282804c9578fd662439abee020a7b863c82a344f64f08539abe4f6b431-45662b3e95014acb903db631517d0c54",
+        "source_id": "segment-a337a39a84c881cc9fce44c21605675246fda7d22045ff1621f792739da11a86-0.ready",
+        "source_bytes": 16428,
+        "source_hash_before": "b060690a88c5afb4b32056d1bb3086d3ea694b8f682e733896e24fc642c6980a",
+        "source_hash_after": "b060690a88c5afb4b32056d1bb3086d3ea694b8f682e733896e24fc642c6980a",
+        "local_unchanged": true,
+        "cleanup_invoked": false,
+        "attempt_count": 1,
+        "first_failed": true,
+        "first_error_class": "io.github.headmaster218.recorder.core.FtpsTransfer$VerificationException",
+        "reconcile_only": false,
+        "reconcile_failed": false,
+        "raw_sockets_created": 3,
+        "raw_connections_made": 3,
+        "all_raw_sockets_closed": true,
+        "callback_registrations": 1,
+        "callback_unregistrations": 1,
+        "cancel_fired": false,
+        "closed_at_cancel": false,
+        "first_elapsed_ms": 1231,
+        "cancel_return_ms": -1,
+        "result": null
+      },
+      "server": {
+        "sessions": 1,
+        "control_tls": 1,
+        "data_tls": 2,
+        "data_bytes": 32855,
+        "fault": true,
+        "all_closed": true,
+        "errors": [],
+        "commands": [
+          {
+            "session": 1,
+            "cmd": "AUTH",
+            "tls": false
+          },
+          {
+            "session": 1,
+            "cmd": "USER",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "PASS",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "PBSZ",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "PROT",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "TYPE",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "CWD",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "MKD",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "CWD",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "EPSV",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "STOR",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "EPSV",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "RETR",
+            "tls": true
+          }
+        ],
+        "remote_files": {
+          "fixture/r-171adf282804c9578fd662439abee020a7b863c82a344f64f08539abe4f6b431-45662b3e95014acb903db631517d0c54/audio.wav": {
+            "size": 16427,
+            "sha256": "2914fc511239c25328f5ab9e4ca313ec9f7ffc80065bea85452b1d794dc02980"
+          }
+        }
+      }
+    },
+    {
+      "scenario": "partial_disconnect",
+      "seconds": 1.801,
+      "client": {
+        "scenario": "partial_disconnect",
+        "status": "expected_failure",
+        "attempt": "r-171adf282804c9578fd662439abee020a7b863c82a344f64f08539abe4f6b431-3e9407a974ed464db6ca4a9e404d78b6",
+        "remote_directory": "/fixture/r-171adf282804c9578fd662439abee020a7b863c82a344f64f08539abe4f6b431-3e9407a974ed464db6ca4a9e404d78b6",
+        "source_id": "segment-a337a39a84c881cc9fce44c21605675246fda7d22045ff1621f792739da11a86-0.ready",
+        "source_bytes": 16428,
+        "source_hash_before": "b060690a88c5afb4b32056d1bb3086d3ea694b8f682e733896e24fc642c6980a",
+        "source_hash_after": "b060690a88c5afb4b32056d1bb3086d3ea694b8f682e733896e24fc642c6980a",
+        "local_unchanged": true,
+        "cleanup_invoked": false,
+        "attempt_count": 2,
+        "first_failed": true,
+        "first_error_class": "java.io.IOException",
+        "reconcile_only": true,
+        "reconcile_failed": true,
+        "raw_sockets_created": 4,
+        "raw_connections_made": 4,
+        "all_raw_sockets_closed": true,
+        "callback_registrations": 2,
+        "callback_unregistrations": 2,
+        "cancel_fired": false,
+        "closed_at_cancel": false,
+        "first_elapsed_ms": 1113,
+        "cancel_return_ms": -1,
+        "result": null
+      },
+      "server": {
+        "sessions": 2,
+        "control_tls": 2,
+        "data_tls": 2,
+        "data_bytes": 2048,
+        "fault": true,
+        "all_closed": true,
+        "errors": [],
+        "commands": [
+          {
+            "session": 1,
+            "cmd": "AUTH",
+            "tls": false
+          },
+          {
+            "session": 1,
+            "cmd": "USER",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "PASS",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "PBSZ",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "PROT",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "TYPE",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "CWD",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "MKD",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "CWD",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "EPSV",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "STOR",
+            "tls": true
+          },
+          {
+            "session": 2,
+            "cmd": "AUTH",
+            "tls": false
+          },
+          {
+            "session": 2,
+            "cmd": "USER",
+            "tls": true
+          },
+          {
+            "session": 2,
+            "cmd": "PASS",
+            "tls": true
+          },
+          {
+            "session": 2,
+            "cmd": "PBSZ",
+            "tls": true
+          },
+          {
+            "session": 2,
+            "cmd": "PROT",
+            "tls": true
+          },
+          {
+            "session": 2,
+            "cmd": "TYPE",
+            "tls": true
+          },
+          {
+            "session": 2,
+            "cmd": "CWD",
+            "tls": true
+          },
+          {
+            "session": 2,
+            "cmd": "CWD",
+            "tls": true
+          },
+          {
+            "session": 2,
+            "cmd": "EPSV",
+            "tls": true
+          },
+          {
+            "session": 2,
+            "cmd": "RETR",
+            "tls": true
+          }
+        ],
+        "remote_files": {
+          "fixture/r-171adf282804c9578fd662439abee020a7b863c82a344f64f08539abe4f6b431-3e9407a974ed464db6ca4a9e404d78b6/audio.wav": {
+            "size": 1024,
+            "sha256": "ffa60bf40deb963e2e59aee1c21a395acfabce548ad331c5726217411989ec64"
+          }
+        }
+      }
+    },
+    {
+      "scenario": "lost_final_reply",
+      "seconds": 2.705,
+      "client": {
+        "scenario": "lost_final_reply",
+        "status": "reconciled",
+        "attempt": "r-171adf282804c9578fd662439abee020a7b863c82a344f64f08539abe4f6b431-7b8524efb65b4613bff4b9edfd5e5847",
+        "remote_directory": "/fixture/r-171adf282804c9578fd662439abee020a7b863c82a344f64f08539abe4f6b431-7b8524efb65b4613bff4b9edfd5e5847",
+        "source_id": "segment-a337a39a84c881cc9fce44c21605675246fda7d22045ff1621f792739da11a86-0.ready",
+        "source_bytes": 16428,
+        "source_hash_before": "b060690a88c5afb4b32056d1bb3086d3ea694b8f682e733896e24fc642c6980a",
+        "source_hash_after": "b060690a88c5afb4b32056d1bb3086d3ea694b8f682e733896e24fc642c6980a",
+        "local_unchanged": true,
+        "cleanup_invoked": false,
+        "attempt_count": 2,
+        "first_failed": true,
+        "first_error_class": "java.io.IOException",
+        "reconcile_only": true,
+        "reconcile_failed": false,
+        "raw_sockets_created": 17,
+        "raw_connections_made": 17,
+        "all_raw_sockets_closed": true,
+        "callback_registrations": 2,
+        "callback_unregistrations": 2,
+        "cancel_fired": false,
+        "closed_at_cancel": false,
+        "first_elapsed_ms": 1722,
+        "cancel_return_ms": -1,
+        "result": {
+          "verified_at_time": true,
+          "bytes": 16428,
+          "wav_sha256": "b060690a88c5afb4b32056d1bb3086d3ea694b8f682e733896e24fc642c6980a",
+          "metadata_sha256": "00d30bd5587fd86d2ab47e20c86dd979098963550a16fa76fc08382c6b497df4",
+          "marker_sha256": "1d6c3f387d08a78a79fca9fab705954b9b282134e146a0ccb0aac36437c25efc"
+        }
+      },
+      "server": {
+        "sessions": 2,
+        "control_tls": 2,
+        "data_tls": 15,
+        "data_bytes": 86025,
+        "fault": true,
+        "all_closed": true,
+        "errors": [],
+        "commands": [
+          {
+            "session": 1,
+            "cmd": "AUTH",
+            "tls": false
+          },
+          {
+            "session": 1,
+            "cmd": "USER",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "PASS",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "PBSZ",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "PROT",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "TYPE",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "CWD",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "MKD",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "CWD",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "EPSV",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "STOR",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "EPSV",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "RETR",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "EPSV",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "STOR",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "EPSV",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "RETR",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "EPSV",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "STOR",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "EPSV",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "RETR",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "EPSV",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "RETR",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "EPSV",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "RETR",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "EPSV",
+            "tls": true
+          },
+          {
+            "session": 1,
+            "cmd": "RETR",
+            "tls": true
+          },
+          {
+            "session": 2,
+            "cmd": "AUTH",
+            "tls": false
+          },
+          {
+            "session": 2,
+            "cmd": "USER",
+            "tls": true
+          },
+          {
+            "session": 2,
+            "cmd": "PASS",
+            "tls": true
+          },
+          {
+            "session": 2,
+            "cmd": "PBSZ",
+            "tls": true
+          },
+          {
+            "session": 2,
+            "cmd": "PROT",
+            "tls": true
+          },
+          {
+            "session": 2,
+            "cmd": "TYPE",
+            "tls": true
+          },
+          {
+            "session": 2,
+            "cmd": "CWD",
+            "tls": true
+          },
+          {
+            "session": 2,
+            "cmd": "CWD",
+            "tls": true
+          },
+          {
+            "session": 2,
+            "cmd": "EPSV",
+            "tls": true
+          },
+          {
+            "session": 2,
+            "cmd": "RETR",
+            "tls": true
+          },
+          {
+            "session": 2,
+            "cmd": "EPSV",
+            "tls": true
+          },
+          {
+            "session": 2,
+            "cmd": "RETR",
+            "tls": true
+          },
+          {
+            "session": 2,
+            "cmd": "EPSV",
+            "tls": true
+          },
+          {
+            "session": 2,
+            "cmd": "RETR",
+            "tls": true
+          },
+          {
+            "session": 2,
+            "cmd": "EPSV",
+            "tls": true
+          },
+          {
+            "session": 2,
+            "cmd": "RETR",
+            "tls": true
+          },
+          {
+            "session": 2,
+            "cmd": "EPSV",
+            "tls": true
+          },
+          {
+            "session": 2,
+            "cmd": "RETR",
+            "tls": true
+          },
+          {
+            "session": 2,
+            "cmd": "EPSV",
+            "tls": true
+          },
+          {
+            "session": 2,
+            "cmd": "RETR",
+            "tls": true
+          }
+        ],
+        "remote_files": {
+          "fixture/r-171adf282804c9578fd662439abee020a7b863c82a344f64f08539abe4f6b431-7b8524efb65b4613bff4b9edfd5e5847/segment.v1.bin": {
+            "size": 419,
+            "sha256": "00d30bd5587fd86d2ab47e20c86dd979098963550a16fa76fc08382c6b497df4"
+          },
+          "fixture/r-171adf282804c9578fd662439abee020a7b863c82a344f64f08539abe4f6b431-7b8524efb65b4613bff4b9edfd5e5847/delivery.v1.txt": {
+            "size": 358,
+            "sha256": "1d6c3f387d08a78a79fca9fab705954b9b282134e146a0ccb0aac36437c25efc"
+          },
+          "fixture/r-171adf282804c9578fd662439abee020a7b863c82a344f64f08539abe4f6b431-7b8524efb65b4613bff4b9edfd5e5847/audio.wav": {
+            "size": 16428,
+            "sha256": "b060690a88c5afb4b32056d1bb3086d3ea694b8f682e733896e24fc642c6980a"
+          }
+        }
+      }
+    },
+    {
+      "scenario": "stalled_handshake",
+      "seconds": 0.956,
+      "client": {
+        "scenario": "stalled_handshake",
+        "status": "expected_failure",
+        "attempt": "r-171adf282804c9578fd662439abee020a7b863c82a344f64f08539abe4f6b431-0ce390c6fb7f407c8508fe0ce037bbf4",
+        "remote_directory": "/fixture/r-171adf282804c9578fd662439abee020a7b863c82a344f64f08539abe4f6b431-0ce390c6fb7f407c8508fe0ce037bbf4",
+        "source_id": "segment-a337a39a84c881cc9fce44c21605675246fda7d22045ff1621f792739da11a86-0.ready",
+        "source_bytes": 16428,
+        "source_hash_before": "b060690a88c5afb4b32056d1bb3086d3ea694b8f682e733896e24fc642c6980a",
+        "source_hash_after": "b060690a88c5afb4b32056d1bb3086d3ea694b8f682e733896e24fc642c6980a",
+        "local_unchanged": true,
+        "cleanup_invoked": false,
+        "attempt_count": 1,
+        "first_failed": true,
+        "first_error_class": "java.net.SocketException",
+        "reconcile_only": false,
+        "reconcile_failed": false,
+        "raw_sockets_created": 1,
+        "raw_connections_made": 1,
+        "all_raw_sockets_closed": true,
+        "callback_registrations": 1,
+        "callback_unregistrations": 1,
+        "cancel_fired": true,
+        "closed_at_cancel": true,
+        "first_elapsed_ms": 434,
+        "cancel_return_ms": 77,
+        "result": null
+      },
+      "server": {
+        "sessions": 1,
+        "control_tls": 0,
+        "data_tls": 0,
+        "data_bytes": 0,
+        "fault": false,
+        "all_closed": true,
+        "errors": [],
+        "commands": [
+          {
+            "session": 1,
+            "cmd": "AUTH",
+            "tls": false
+          }
+        ],
+        "remote_files": {}
+      }
+    }
+  ],
+  "production_classes_sha256": {
+    "io/github/headmaster218/recorder/android/FtpsNetwork$1.class": "69405b14e04b12a6f3835b0f0037a4a6cc9054253ac98203bcc89a313cf08360",
+    "io/github/headmaster218/recorder/android/FtpsNetwork$2.class": "f0f1d6ff932324e3cbe5868a16ed4986a7000836d0266b5244b2c2aa54a345f7",
+    "io/github/headmaster218/recorder/android/FtpsNetwork$3$1.class": "69267924effb5a24f51a14c9b43f2e19ceeccad4ca5251689d511e479aab03b4",
+    "io/github/headmaster218/recorder/android/FtpsNetwork$3.class": "a6a8d74cf4e96bec65f6156564d4363af12175f7ed514f07ce3c60a33fa6ce9a",
+    "io/github/headmaster218/recorder/android/FtpsNetwork$4.class": "1fe808b628ad86a4e1ef97d4830d312ad1860fee750abea1e24c804ac370e00b",
+    "io/github/headmaster218/recorder/android/FtpsNetwork$5.class": "e585985829baa2c9953d472a3ab4717d9757a5c66fe1fb14eb308aa44a556439",
+    "io/github/headmaster218/recorder/android/FtpsNetwork$BoundConnection.class": "7667be20ec20a64cebf87236974e2a8e62c2ebcfb167d25bfc631ae35af807b9",
+    "io/github/headmaster218/recorder/android/FtpsNetwork.class": "0594cc4721085f36114894394c78aad30fc34c7e4df8c4f97186093a00793ce2",
+    "io/github/headmaster218/recorder/core/FtpsTransfer$1.class": "5e44df0d97f03d48f6823f35cff4f871c8fec93552e653a2d6fc0b02a6fd8ab3",
+    "io/github/headmaster218/recorder/core/FtpsTransfer$Connection.class": "c17d0f59fe48ba0ec90d96c7ee1de54db5ab2a00b044e31354fe99b92f30d5b3",
+    "io/github/headmaster218/recorder/core/FtpsTransfer$Connector.class": "a9eb130795109c6d9f4a637f434f67d08c0db634eb523d99aacd5e7f3ca3b87f",
+    "io/github/headmaster218/recorder/core/FtpsTransfer$Guard.class": "435edcc13459d67ed50f6f837793fc8a0fda13e70616e7441a89b035c4989046",
+    "io/github/headmaster218/recorder/core/FtpsTransfer$Profile.class": "c785f46a390cf3949061f6ff38d2b4059158e2aca148a29e03a5f0a0dc7ba202",
+    "io/github/headmaster218/recorder/core/FtpsTransfer$ProtocolException.class": "fc6abb732fa063d4594ff33db130792aaf1d0c7b032903bc179388ff4bc9b71b",
+    "io/github/headmaster218/recorder/core/FtpsTransfer$Reply.class": "0e734b5d47e8ea744e4ce1a9a95da5124b4f07b58641eb28bdb66908958d4125",
+    "io/github/headmaster218/recorder/core/FtpsTransfer$Result.class": "179cd7cb76f193a586fc6ace983007e54e4cb4d1f6b4ffa4d66d6d8f97b83c14",
+    "io/github/headmaster218/recorder/core/FtpsTransfer$Session.class": "88f4ec2a03cfc9935981d2b4e2499bd2f6f672199e72ad06663b72c273b18c89",
+    "io/github/headmaster218/recorder/core/FtpsTransfer$VerificationException.class": "7ea39e65af5c6e589796c4f76a6f912240410a54b87501410bec65987587a73a",
+    "io/github/headmaster218/recorder/core/FtpsTransfer.class": "ccf755537596c4b548ccdc5c5df06a9946f20b61f8329eaff81bfe237545a627"
+  }
+}
