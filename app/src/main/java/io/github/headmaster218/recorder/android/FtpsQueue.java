@@ -277,11 +277,11 @@ final class FtpsQueue extends SQLiteOpenHelper {
     }
     void automaticCapacityWait(long nextAt) {
         ContentValues v=new ContentValues();v.put("auto_capacity_at",nextAt);
-        v.put("auto_notice","ON: waiting for queue capacity; destination consent retained. Historical catch-up waits until recording stops.");
+        v.put("auto_notice","ON: waiting for queue capacity; destination consent retained. Historical catch-up uses bounded finalized-source leases.");
         getWritableDatabase().update("settings",v,"id=1 AND auto_revision IS NOT NULL",null);
     }
     void automaticCapacityScanned() {
-        ContentValues v=new ContentValues();v.put("auto_capacity_at",0);v.put("auto_notice","ON: capacity catch-up discovered; historical confirmation may wait until recording stops.");
+        ContentValues v=new ContentValues();v.put("auto_capacity_at",0);v.put("auto_notice","ON: capacity catch-up discovered; historical confirmation uses finalized-source leases.");
         getWritableDatabase().update("settings",v,"id=1 AND auto_revision IS NOT NULL",null);
     }
     boolean contains(String source, String revision) {

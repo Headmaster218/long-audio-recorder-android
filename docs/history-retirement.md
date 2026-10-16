@@ -1,5 +1,8 @@
 # Bounded exact history retirement (dev12)
 
+Dev13 separately adds [continuous historical enrollment](continuous-enrollment.md).
+The idle-only catch-up gap below describes the original dev12 slice.
+
 Dev12 compacts detailed transfer rows only after the source's local cleanup has
 completed and its exact original empty `.retired` directory is proven. This
 module never removes audio. Cleanup still requires the separate destination-bound

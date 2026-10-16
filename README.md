@@ -2,7 +2,9 @@
 
 # Android recorder
 
-Version: **0.1.0-dev12** (bounded history-retirement source candidate; unsigned build only, not device-qualified).
+Version: **0.1.0-dev13** (continuous historical-enrollment source candidate; unsigned build only, not device-qualified).
+
+Dev13 adds bounded historical catch-up during recording through the existing shared-owner lease. More than 500 unknown chunks are paged without clearing consent, subject to finite namespace/cache/queue limits. See [admission, cancellation and runtime limits](docs/continuous-enrollment.md).
 
 Dev12 adds exact, bounded compaction of eligible verified-transfer history and empty ordinal markers. See [crash ordering, bounds and test limits](docs/history-retirement.md). This removes the ordinary contiguous-history lifetime cap, while finite fragmentation and pending-work caps remain.
 

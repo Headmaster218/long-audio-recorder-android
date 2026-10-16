@@ -20,13 +20,14 @@ yes('if(queue.full()){capacityWait();' in published)
 resume=worker[worker.index('private void resumeCapacity'):worker.index('private void prepareCatchup')]
 yes('queue.paused()' in resume and 'pauseRequested.get()' in resume and 'queue.automaticRevision()==null' in resume)
 yes('queue.automaticCapacityAt()>System.currentTimeMillis()' in resume)
-yes(resume.index('prepareCatchup();')<resume.index('queue.automaticCapacityScanned();'))
-yes('if(queue.full()){queue.automaticCapacityWait(System.currentTimeMillis()+300000);return;}' in resume)
+prepare=worker[worker.index('private void prepareCatchup'):worker.index('private void postCatchup')]
+yes(prepare.index('if(discovered.hasMore)queue.automaticCapacityWait')<prepare.index('catchup=discovered.ids'))
+yes('if(queue.full()||(catchup!=null&&!catchup.isEmpty()))' in resume)
 yes('queue.automaticCapacityAt()-now' in worker)
 yes('if(queue.automaticCapacityAt()==0){prepareCatchup(); postCatchup();}' in worker)
-yes('4096,FtpsQueue.MAX_ROWS' in worker)
+yes('4096,64,cancellation' in worker)
 catchup=worker[worker.index('private void catchupOne'):worker.index('void captureClosed')]
-yes('if(reservation.owner!=null)' in catchup)
+yes('DirectorySpool spool=reservation.owner' in catchup and 'spool.enrollment(id)' in catchup)
 retire=worker[worker.index('private void retireHistory'):worker.index('private static boolean cleanupPending')]
 yes(retire.index('generation=queue.beginRetirement')<retire.index('RetirementStore.synchronize'))
 yes(retire.index('lease.pruneRetired')<retire.index('queue.finishRetirement'))

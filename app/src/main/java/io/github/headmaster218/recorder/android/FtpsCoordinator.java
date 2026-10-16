@@ -65,6 +65,31 @@ final class FtpsCoordinator {
             if (cancelled.get() || SystemClock.elapsedRealtime() >= deadline) throw new IOException("Transfer job cancelled or deadline reached");
         }
     }
+    /** A single-use authorization boundary. No filesystem/SQLite operation holds this monitor. */
+    static final class EnrollmentConsent {
+        private String pin;
+        private long epoch;
+        static final class Ticket {
+            final String source,revision;final long epoch;final EnrollmentConsent owner;private boolean used;
+            Ticket(EnrollmentConsent owner,String source,String revision,long epoch){this.owner=owner;this.source=source;this.revision=revision;this.epoch=epoch;}
+        }
+        synchronized long epoch(){return epoch;}
+        synchronized void disable(){pin=null;if(epoch<Long.MAX_VALUE)epoch++;}
+        synchronized boolean enable(String revision,long expected){
+            if(epoch!=expected||epoch==Long.MAX_VALUE||revision==null)return false;pin=revision;epoch++;return true;
+        }
+        synchronized Ticket ticket(String source,String revision){return pin!=null&&pin.equals(revision)?new Ticket(this,source,revision,epoch):null;}
+        synchronized boolean cancelled(Ticket ticket){return ticket==null||ticket.owner!=this||ticket.epoch!=epoch||!ticket.revision.equals(pin);}
+        synchronized boolean admit(Ticket ticket){
+            if(cancelled(ticket)||ticket.used)return false;ticket.used=true;return true;
+        }
+    }
+    private static final class CatchupDeferred extends IOException {
+        private static final long serialVersionUID=1L;
+        CatchupDeferred(){super("historical enrollment paused, disabled, or owner/job stopping");}
+    }
+    private final EnrollmentConsent enrollmentConsent=new EnrollmentConsent();
+    private final AtomicBoolean automaticDisableQueued=new AtomicBoolean();
     private final Context context;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final AtomicBoolean commandPending = new AtomicBoolean();
@@ -97,18 +122,34 @@ final class FtpsCoordinator {
     private boolean catchupDeferred;
     private Path spoolRoot() throws IOException { return context.getFilesDir().toPath().toRealPath().resolve("audio-spool"); }
     private void automaticBlocked(String reason) {
+        enrollmentConsent.disable();
         queue.automatic(null,reason + "; enrollment OFF; originals and existing queue retained. Review and enable again.");
         catchup = null; catchupDeferred = false;
     }
     void automatic(final boolean enabled, final String shownRevision) {
+        if(!enabled){
+            enrollmentConsent.disable(); // Immediate cancellation, even while a transfer/hash is busy.
+            if(!automaticDisableQueued.compareAndSet(false,true))return;
+            worker.execute(new Runnable(){@Override public void run(){
+                try{
+                    if(!unavailable){queue.automatic(null,"OFF: new admission disabled; one already-admitted row may finish. Pause stops queued transfers.");
+                        catchup=null;catchupDeferred=false;publish("Automatic enrollment disabled.",false);schedule(nextDelay());}
+                }catch(RuntimeException failed){fatal();}finally{automaticDisableQueued.set(false);}
+            }});
+            return;
+        }
+        final long requestedEpoch=enrollmentConsent.epoch();
         command(new Command() { @Override public void run() throws IOException {
             FtpsQueue.Profile current = queue.current();
-            if (enabled && (current == null || !current.revision.equals(shownRevision))) {
+            if (current == null || !current.revision.equals(shownRevision)) {
                 publish("Destination changed; review and enable again.",false); return;
             }
-            queue.automatic(enabled ? shownRevision : null,enabled ? "ON: pinned to " + current.label() : "OFF: already queued work remains authorized; Pause stops transfers");
+            queue.automatic(shownRevision,"ON: pinned to " + current.label());
+            if(!enrollmentConsent.enable(shownRevision,requestedEpoch)){
+                queue.automatic(null,"OFF: enable superseded by Disable");return;
+            }
             catchup = null; catchupDeferred = false;
-            if (enabled) { try { prepareCatchup(); } catch (IOException e) { automaticBlocked("Discovery bounds or validation failed"); } }
+            try { prepareCatchup(); } catch(CatchupDeferred deferred){catchupDeferred=true;} catch (IOException e) { automaticBlocked("Discovery bounds or validation failed"); }
             publish("Automatic enrollment setting saved. Uncertain sources retained.",false);
             postCatchup();
         } });
@@ -118,13 +159,35 @@ final class FtpsCoordinator {
     }
     private void resumeCapacity() throws IOException {
         if(queue.paused() || pauseRequested.get() || queue.automaticRevision()==null || queue.automaticCapacityAt()==0 || queue.automaticCapacityAt()>System.currentTimeMillis())return;
-        if(queue.full()){queue.automaticCapacityWait(System.currentTimeMillis()+300000);return;}
+        if(queue.full()||(catchup!=null&&!catchup.isEmpty())){queue.automaticCapacityWait(System.currentTimeMillis()+300000);return;}
         // One bounded names-only scan per due capacity wake; never scan in published().
-        prepareCatchup();queue.automaticCapacityScanned();catchupDeferred=false;postCatchup();
+        prepareCatchup();catchupDeferred=false;postCatchup();
     }
     private void prepareCatchup() throws IOException {
-        String revision = queue.automaticRevision(); if (revision == null) return;
-        catchup = io.github.headmaster218.recorder.core.FinalizedDiscovery.candidates(spoolRoot(),new io.github.headmaster218.recorder.core.FinalizedDiscovery.Known() { @Override public boolean contains(String id) { return queue.contains(id,revision); } },4096,FtpsQueue.MAX_ROWS);
+        final String revision = queue.automaticRevision(); if (revision == null) return;
+        final EnrollmentConsent.Ticket ticket=enrollmentConsent.ticket("(discovery)",revision);
+        final Job job=activeJob;
+        final VerifiedExport.Cancellation cancellation=new VerifiedExport.Cancellation(){@Override public boolean cancelled(){
+            return pauseRequested.get()||enrollmentConsent.cancelled(ticket)
+                ||(job!=null&&job.deadline>0&&(job.cancelled.get()||SystemClock.elapsedRealtime()>=job.deadline));
+        }};
+        try{
+            if(queue.paused())throw new CatchupDeferred();
+            io.github.headmaster218.recorder.core.FinalizedDiscovery.Page discovered=io.github.headmaster218.recorder.core.FinalizedDiscovery.page(
+                spoolRoot(),new io.github.headmaster218.recorder.core.FinalizedDiscovery.Known(){@Override public boolean contains(String id){return queue.contains(id,revision);}},4096,64,cancellation);
+            if(cancellation.cancelled())throw new IOException("Historical enrollment cancelled");
+            if(queue.paused()||!revision.equals(queue.automaticRevision()))throw new CatchupDeferred();
+            // Persist continuation BEFORE exposing a page to processing; membership is its durable cursor.
+            if(discovered.hasMore)queue.automaticCapacityWait(System.currentTimeMillis()+300000);
+            else queue.automaticCapacityScanned();
+            catchup=discovered.ids;
+        }catch(IOException failed){
+            if(cancellation.cancelled()||queue.paused()||failed instanceof CatchupDeferred){
+                if(!enrollmentConsent.cancelled(ticket))capacityWait();
+                throw new CatchupDeferred();
+            }
+            throw failed;
+        }
     }
 
     private void postCatchup() {
@@ -135,7 +198,7 @@ final class FtpsCoordinator {
                 try { catchupOne(); if (!unavailable) { publish(snapshot.notice,false); schedule(nextDelay()); postCatchup(); } }
                 catch (IOException | RuntimeException e) {
                     try {
-                        if (pauseRequested.get() || queue.paused()) { catchupDeferred = true; publish("Catch-up paused; consent and uncertain sources retained.",false); }
+                        if (pauseRequested.get() || queue.paused() || e instanceof CatchupDeferred || e instanceof DirectorySpool.MaintenanceBusy) { catchupDeferred = true; publish("Catch-up deferred; consent and uncertain sources retained.",false); schedule(nextDelay()); }
                         else { automaticBlocked("Catch-up confirmation failed"); publish("Catch-up stopped safely",false); }
                     } catch (RuntimeException failure) { fatal(); }
                 }
@@ -149,18 +212,39 @@ final class FtpsCoordinator {
         if (queue.contains(id,revision)) { catchup.remove(); return; }
         if (queue.full()) retireHistory();
         if (queue.full()) { capacityWait(); catchupDeferred=true; return; }
+        final EnrollmentConsent.Ticket ticket=enrollmentConsent.ticket(id,revision);
+        if(ticket==null)throw new CatchupDeferred();
         SpoolAdmission.Reservation reservation;
         try { reservation=SpoolAdmission.beginMaintenance(); }
         catch(IOException e) { catchupDeferred=true; return; }
+        DirectorySpool spool=reservation.owner;boolean idle=spool==null;
+        final long deadline=SystemClock.elapsedRealtime()+10000;
+        final Job job=activeJob;
+        final VerifiedExport.Cancellation cancellation=new VerifiedExport.Cancellation(){@Override public boolean cancelled(){
+            return SystemClock.elapsedRealtime()>=deadline||pauseRequested.get()||enrollmentConsent.cancelled(ticket)
+                || (job!=null&&job.deadline>0&&(job.cancelled.get()||SystemClock.elapsedRealtime()>=job.deadline));
+        }};
         try {
-            if(reservation.owner!=null) { catchupDeferred=true; return; }
-            final long deadline=SystemClock.elapsedRealtime()+10000;
-            try(DirectorySpool spool=new DirectorySpool(spoolRoot(),new CachePolicy(RecordingSettings.defaults().cacheBytes,RecordingSettings.FREE_RESERVE),new AndroidDirectoryProtocol(),new DirectorySpool.Faults() { @Override public void before(DirectorySpool.Operation op,Path path) { } },new RetirementStore(context))) {
-                spool.confirmReady(id,new VerifiedExport.Cancellation() { @Override public boolean cancelled() { return SystemClock.elapsedRealtime()>=deadline || pauseRequested.get(); } });
+            if(idle)spool=new DirectorySpool(spoolRoot(),new CachePolicy(RecordingSettings.defaults().cacheBytes,RecordingSettings.FREE_RESERVE),
+                new AndroidDirectoryProtocol(),new DirectorySpool.Faults(){@Override public void before(DirectorySpool.Operation op,Path path){}},new RetirementStore(context));
+            try(DirectorySpool.Maintenance lease=spool.enrollment(id)){
+                SegmentStore.Published confirmed=lease.confirmEnrollment(cancellation);
+                CommittedSegments.Entry entry=catalog.load(id);
+                if(!Arrays.equals(entry.metadata.encode(),confirmed.metadata.encode()))throw new IOException("Historical identity changed");
+                if(cancellation.cancelled())throw new IOException("Historical enrollment cancelled");lease.checkEnrollment();
+                if(queue.paused()||!revision.equals(queue.automaticRevision())||!enrollmentConsent.admit(ticket))throw new CatchupDeferred();
+                // Disable after this admission may allow this one exact source+pin row to finish.
+                queue.enqueue(entry,ticket.revision,true);catchup.remove();
             }
-        } finally { reservation.close(); }
-        queue.enqueue(catalog.load(id),revision,true); catchup.remove();
+        } catch(IOException failed){
+            if(pauseRequested.get()||enrollmentConsent.cancelled(ticket)
+                || (job!=null&&job.deadline>0&&(job.cancelled.get()||SystemClock.elapsedRealtime()>=job.deadline)))throw new CatchupDeferred();
+            throw failed;
+        } finally {
+            try{if(idle&&spool!=null)spool.close();}finally{reservation.close();}
+        }
     }
+
     void captureClosed() {
         if (!catchupPosted.compareAndSet(false,true)) return;
         worker.execute(new Runnable() { @Override public void run() {
@@ -176,11 +260,14 @@ final class FtpsCoordinator {
                 if (overflow.getAndSet(false)) automaticBlocked("Finalize notification bound reached");
                 String revision = queue.automaticRevision();
                 if (revision != null) {
+                    EnrollmentConsent.Ticket ticket=enrollmentConsent.ticket(published.localObjectId,revision);
+                    if(ticket==null)return;
                     CommittedSegments.Entry entry = catalog.load(published.localObjectId);
                     if (!Arrays.equals(entry.metadata.encode(),published.metadata.encode())) throw new IOException("Published identity changed");
                     if(queue.full())retireHistory();
                     if(queue.full()){capacityWait();publish(queue.automaticNotice(),false);schedule(nextDelay());return;}
-                    queue.enqueue(entry,revision,true); publish("Finalized chunk enrolled automatically; transfer policy and hard gates still apply.",false); schedule(nextDelay());
+                    if(!enrollmentConsent.admit(ticket))return;
+                    queue.enqueue(entry,ticket.revision,true); publish("Finalized chunk enrolled automatically; transfer policy and hard gates still apply.",false); schedule(nextDelay());
                 }
             } catch (IOException | RuntimeException e) {
                 try { automaticBlocked("Automatic enrollment failed or queue history is full"); publish("Automatic enrollment stopped safely",false); }
@@ -190,13 +277,15 @@ final class FtpsCoordinator {
     }
     private FtpsCoordinator(Context context) {
         this.context = context;
+        final long startupEpoch=enrollmentConsent.epoch();
         worker.execute(new Runnable() { @Override public void run() {
             try {
                 queue = new FtpsQueue(FtpsCoordinator.this.context); queue.getWritableDatabase(); queue.recover();
+                enrollmentConsent.enable(queue.automaticRevision(),startupEpoch);
                 catalog = new CommittedSegments(FtpsCoordinator.this.context.getFilesDir().toPath().toRealPath().resolve("audio-spool"));
                 replayCleanup(); retireHistory();
                 try { if(queue.automaticCapacityAt()==0){prepareCatchup(); postCatchup();} }
-                catch (IOException e) { automaticBlocked("Discovery failed"); }
+                catch(CatchupDeferred deferred){catchupDeferred=true;} catch (IOException e) { automaticBlocked("Discovery failed"); }
                 publish("Transfer state restored. Review automatic enrollment status below.",false);
                 schedule(nextDelay()); // Repairs a crash after queue commit but before scheduler submission.
             } catch (IOException | RuntimeException e) { fatal(); }
@@ -453,7 +542,7 @@ final class FtpsCoordinator {
                 if (!unavailable && !pauseRequested.get()) {
                     job.deadline = SystemClock.elapsedRealtime() + FtpsNetwork.ATTEMPT_MILLIS;
                     runOne(job); retireHistory();
-                    try{resumeCapacity();}catch(IOException e){automaticBlocked("Capacity discovery bounds or validation failed");}
+                    try{resumeCapacity();}catch(CatchupDeferred deferred){catchupDeferred=true;}catch(IOException e){automaticBlocked("Capacity discovery bounds or validation failed");}
                 }
                 if (!unavailable) {
                     if (pauseRequested.get()) queue.pause(true);

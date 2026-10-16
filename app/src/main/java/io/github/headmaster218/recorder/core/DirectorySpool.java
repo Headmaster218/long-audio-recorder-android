@@ -83,6 +83,7 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
     private final FileChannel lockChannel;
     private final FileLock lock;
     private volatile Stage active;
+    private String publishing; // Identity is published/cleared only under this owner monitor.
     private volatile boolean closed;
     private boolean closing;
     private Maintenance maintenance;
@@ -386,10 +387,12 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
             SegmentMetadata metadata = new SegmentMetadata(intent, manifest, hashes[1]);
             writeNew(directory.resolve(MANIFEST), metadata.encode(), Operation.WRITE_MANIFEST, Operation.SYNC_MANIFEST, false);
             syncDirectory(Operation.SYNC_STAGE, directory);
-            Path target = root.resolve(id(intent) + ".ready"); op(Operation.PUBLISH, target); protocol.atomicPublish(directory, target);
+            Path target = root.resolve(id(intent) + ".ready");
+            synchronized(DirectorySpool.this){publishing=target.getFileName().toString();}
+            op(Operation.PUBLISH, target); protocol.atomicPublish(directory, target);
             syncDirectory(Operation.SYNC_ROOT, root); validate(target);
-            synchronized(DirectorySpool.this) { confirmed.add(target.getFileName().toString()); eligible.add(SpoolUsage.key(target.getFileName().toString())); }
-            active = null; return new Published(target.getFileName().toString(), metadata);
+            synchronized(DirectorySpool.this) { confirmed.add(target.getFileName().toString()); eligible.add(SpoolUsage.key(target.getFileName().toString())); active=null; publishing=null; }
+            return new Published(target.getFileName().toString(), metadata);
         }
         @Override public void preserve() throws IOException {
             if (!wav.isOpen()) { done = true; return; }
@@ -412,6 +415,12 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
         if(active!=null && key.equals(SpoolUsage.key(active.directory.getFileName().toString())))
             throw new IOException("active stage is ineligible");
         maintenance=new Maintenance(source,false); return maintenance;
+    }
+    /** Enrollment borrows only an immutable finalized source, never a publication in progress. */
+    public synchronized Maintenance enrollment(String source)throws IOException {
+        SegmentIdentity.parse(source);
+        if(source.equals(publishing))throw new MaintenanceBusy();
+        return maintenance(source);
     }
     /** Only for a DB-committed retirement floor; allows absent marker replay, never audio mutation. */
     public synchronized Maintenance retirement(String source,long durableFloor)throws IOException {
@@ -439,6 +448,23 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
                 if(confirmed.contains(source)) return;
             }
             confirmReady(source,cancellation);
+        }
+        public void checkEnrollment()throws IOException {
+            synchronized(DirectorySpool.this){
+                if(retirementOnly||released||maintenance!=this)throw new IOException("stale enrollment lease");
+                if(closing||closed)throw new MaintenanceBusy();
+                live();
+            }
+        }
+        /** Always canonically validates the exact source; no cached confirmation substitutes for it. */
+        public Published confirmEnrollment(final VerifiedExport.Cancellation cancellation)throws IOException {
+            checkEnrollment();
+            VerifiedExport.Cancellation combined=new VerifiedExport.Cancellation(){@Override public boolean cancelled(){
+                synchronized(DirectorySpool.this){if(closing||closed||released||maintenance!=Maintenance.this)return true;}
+                return cancellation.cancelled();
+            }};
+            try{Published result=confirmReady(source,combined);checkEnrollment();return result;}
+            catch(IOException failed){checkEnrollment();throw failed;}
         }
         public void quarantine(VerifiedLocalCleanup.Prepared binding) throws IOException {
             if(retirementOnly)throw new IOException("retirement lease cannot delete audio");
