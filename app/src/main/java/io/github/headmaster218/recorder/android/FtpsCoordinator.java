@@ -16,6 +16,8 @@ import java.util.concurrent.Semaphore;
 import io.github.headmaster218.recorder.core.DirectorySpool;
 import io.github.headmaster218.recorder.core.CachePolicy;
 import io.github.headmaster218.recorder.core.SegmentStore;
+import io.github.headmaster218.recorder.core.VerifiedLocalCleanup;
+import io.github.headmaster218.recorder.core.VerifiedExport;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -44,7 +46,7 @@ final class FtpsCoordinator {
         final Map<String,String> destinations;
         final String notice;
         final boolean busy, paused;
-        String automaticRevision, automaticNotice = "OFF";
+        String automaticRevision, automaticNotice = "OFF", cleanupRevision, cleanupLabel = "OFF";
         Snapshot(CommittedSegments.Page page,FtpsQueue.Profile profile,List<FtpsQueue.Item> items,
                 Map<String,String> destinations,String notice,boolean busy,boolean paused) {
             this.page = page; this.profile = profile; this.items = Collections.unmodifiableList(items);
@@ -84,6 +86,8 @@ final class FtpsCoordinator {
     private volatile Job activeJob;
     private volatile Snapshot snapshot = new Snapshot(null,null,new ArrayList<FtpsQueue.Item>(),new HashMap<String,String>(),"Loading local transfer state",false,false);
     private boolean unavailable;
+    private final AtomicBoolean cleanupRevoked=new AtomicBoolean();
+    private final AtomicBoolean cleanupDisableQueued=new AtomicBoolean();
     private final Semaphore notifications = new Semaphore(32);
     private final AtomicBoolean overflow = new AtomicBoolean();
     private final AtomicBoolean catchupPosted = new AtomicBoolean();
@@ -103,7 +107,7 @@ final class FtpsCoordinator {
             queue.automatic(enabled ? shownRevision : null,enabled ? "ON: pinned to " + current.label() : "OFF: already queued work remains authorized; Pause stops transfers");
             catchup = null; catchupDeferred = false;
             if (enabled) { try { prepareCatchup(); } catch (IOException e) { automaticBlocked("Discovery bounds or validation failed"); } }
-            publish("Automatic enrollment setting saved. Originals retained.",false);
+            publish("Automatic enrollment setting saved. Uncertain sources retained.",false);
             postCatchup();
         } });
     }
@@ -120,7 +124,7 @@ final class FtpsCoordinator {
                 try { catchupOne(); if (!unavailable) { publish(snapshot.notice,false); schedule(nextDelay()); postCatchup(); } }
                 catch (IOException | RuntimeException e) {
                     try {
-                        if (pauseRequested.get() || queue.paused()) { catchupDeferred = true; publish("Catch-up paused; consent and originals retained.",false); }
+                        if (pauseRequested.get() || queue.paused()) { catchupDeferred = true; publish("Catch-up paused; consent and uncertain sources retained.",false); }
                         else { automaticBlocked("Catch-up confirmation failed"); publish("Catch-up stopped safely",false); }
                     } catch (RuntimeException failure) { fatal(); }
                 }
@@ -148,7 +152,7 @@ final class FtpsCoordinator {
     void captureClosed() {
         if (!catchupPosted.compareAndSet(false,true)) return;
         worker.execute(new Runnable() { @Override public void run() {
-            catchupPosted.set(false); catchupDeferred = false; postCatchup();
+            catchupPosted.set(false); catchupDeferred = false; postCatchup(); if(!unavailable) schedule(nextDelay());
         } });
     }
     void published(final SegmentStore.Published published) {
@@ -176,6 +180,7 @@ final class FtpsCoordinator {
             try {
                 queue = new FtpsQueue(FtpsCoordinator.this.context); queue.getWritableDatabase(); queue.recover();
                 catalog = new CommittedSegments(FtpsCoordinator.this.context.getFilesDir().toPath().toRealPath().resolve("audio-spool"));
+                replayCleanup();
                 try { prepareCatchup(); postCatchup(); }
                 catch (IOException e) { automaticBlocked("Discovery failed"); }
                 publish("Transfer state restored. Review automatic enrollment status below.",false);
@@ -188,7 +193,7 @@ final class FtpsCoordinator {
     private void fatal() {
         unavailable = true;
         snapshot = new Snapshot(page,null,new ArrayList<FtpsQueue.Item>(),new HashMap<String,String>(),
-            "Local FTPS journal unavailable. Transfers are blocked; all originals retained. No durability claim is made.",false,true);
+            "Local FTPS journal unavailable. Transfers are blocked; uncertain sources retained. No durability claim is made.",false,true);
     }
     private void publish(String notice, boolean busy) {
         if (unavailable) return;
@@ -202,6 +207,8 @@ final class FtpsCoordinator {
             FtpsQueue.Profile pinned = queue.profile(updated.automaticRevision);
             updated.automaticNotice += "\nPinned destination: " + (pinned == null ? "Unavailable" : pinned.label());
         }
+        updated.cleanupRevision=queue.cleanupRevision();
+        if(updated.cleanupRevision!=null) { FtpsQueue.Profile p=queue.profile(updated.cleanupRevision); updated.cleanupLabel="ON: " + (p==null ? "Unavailable" : p.label()); }
         snapshot = updated;
     }
     private interface Command { void run() throws Exception; default void discard() { } }
@@ -212,7 +219,7 @@ final class FtpsCoordinator {
                 if (unavailable) return;
                 action.run(); if (activeJob == null) schedule(nextDelay());
             } catch (Exception e) {
-                try { publish("Local transfer action failed (" + e.getClass().getSimpleName() + "). Originals retained.",false); }
+                try { publish("Local transfer action failed (" + e.getClass().getSimpleName() + "). Uncertain sources retained.",false); }
                 catch (RuntimeException journalFailure) { fatal(); }
             } finally { action.discard(); commandPending.set(false); }
         } });
@@ -254,6 +261,98 @@ final class FtpsCoordinator {
                 : "This source and destination revision already have a queue record. No duplicate upload or new remote attempt created.",false);
         } });
     }
+    void disableCleanup() {
+        cleanupRevoked.set(true);
+        if(!cleanupDisableQueued.compareAndSet(false,true)) return;
+        worker.execute(new Runnable() { @Override public void run() {
+            try { if(!unavailable) { queue.revokeCleanup(); publish("New local cleanup disabled. Previously committed partial purge may finish; no deleted audio can be restored.",false); schedule(nextDelay()); } }
+            catch(RuntimeException e) { fatal(); }
+            finally { cleanupDisableQueued.set(false); }
+        } });
+    }
+    void cleanupEnabled(final boolean enabled, final String revision) {
+        command(new Command() { @Override public void run() {
+            FtpsQueue.Profile p=queue.current();
+            if(enabled && (p==null || !p.revision.equals(revision))) { publish("Destination changed; review cleanup consent again.",false); return; }
+            queue.revokeCleanup(); queue.cleanupRevision(enabled ? revision : null); cleanupRevoked.set(!enabled);
+            publish(enabled ? "Local cleanup enabled for future freshly verified transfers to this exact destination. Remote future loss remains possible."
+                : "New local cleanup disabled. Already committed partial purge can finish on resume; uncertain files remain.",false);
+        } });
+    }
+    private static final class CleanupDeferred extends IOException {
+        private static final long serialVersionUID=1L;
+        CleanupDeferred() { super("Cleanup waits until recording stops"); }
+    }
+    private interface LocalAction { void run(DirectorySpool spool) throws IOException; }
+    private void localStep(final LocalAction action) throws IOException {
+        synchronized(SpoolAdmission.LOCK) {
+            if(RecorderState.active || ExportCoordinator.cleanupBlocked()) throw new CleanupDeferred();
+            try(DirectorySpool spool=new DirectorySpool(spoolRoot(),new CachePolicy(RecordingSettings.defaults().cacheBytes,RecordingSettings.FREE_RESERVE),new AndroidDirectoryProtocol(),new DirectorySpool.Faults() { @Override public void before(DirectorySpool.Operation op,Path path) { } })) { action.run(spool); }
+        }
+    }
+    private static boolean cleanupPending(FtpsQueue.Item item) {
+        return item.cleanupState.equals("RESTORE_ONLY") || item.cleanupState.equals("INTENT") || item.cleanupState.equals("QUARANTINED") || item.cleanupState.equals("PURGING");
+    }
+    private void replayCleanup() {
+        if(queue.paused() || pauseRequested.get() || RecorderState.active || ExportCoordinator.cleanupBlocked()) return;
+        int handled=0;
+        for(final FtpsQueue.Item item:queue.items(false)) {
+            if(!cleanupPending(item) || handled++>=8) continue;
+            try {
+                if(!item.state.equals("VERIFIED_AT_TIME") || item.verifiedAt<=0 || item.resultMetadataHash==null || item.markerHash==null) throw new IOException("Missing durable verification receipt");
+                final VerifiedLocalCleanup.Prepared binding=VerifiedLocalCleanup.decode(item.cleanupBinding,new AndroidCleanupIdentity());
+                if(!item.source.equals(binding.source)) throw new IOException("Cleanup source mismatch");
+                final boolean purge=item.cleanupState.equals("PURGING");
+                localStep(new LocalAction() { @Override public void run(DirectorySpool spool) throws IOException {
+                    if(pauseRequested.get()) throw new IOException("Cleanup paused");
+                    if(purge) spool.purgeQuarantine(binding); else spool.restoreQuarantine(binding);
+                } });
+                queue.cleanup(item,purge ? "REMOVED" : (!item.cleanupState.equals("RESTORE_ONLY") && !cleanupRevoked.get() && item.revision.equals(queue.cleanupRevision()) ? "DEFERRED" : "RESTORED"),item.cleanupBinding);
+            } catch(IOException | RuntimeException e) {
+                try { if(!pauseRequested.get() && !(e instanceof CleanupDeferred)) queue.cleanup(item,"BLOCKED",item.cleanupBinding); }
+                catch(IOException | RuntimeException failed) { fatal(); return; }
+            }
+        }
+    }
+    private void cleanupFresh(final FtpsQueue.Item item, final CommittedSegments.Entry entry, final Job job) {
+        if(!item.revision.equals(queue.cleanupRevision()) || pauseRequested.get() || cleanupRevoked.get()) return;
+        if(queue.otherNeedsSource(item)) { try { queue.cleanup(item,"WAIT_SOURCE",null); } catch(IOException | RuntimeException e) { fatal(); } return; }
+        if(RecorderState.active || ExportCoordinator.cleanupBlocked()) {
+            try { queue.cleanup(item,"DEFERRED",null); } catch(IOException | RuntimeException e) { fatal(); }
+            return;
+        }
+        byte[] encoded=null; String stage="NONE"; final boolean[] purgeEntered={false};
+        try {
+            final long freshness=SystemClock.elapsedRealtime()+30000;
+            final VerifiedLocalCleanup.Prepared binding=VerifiedLocalCleanup.prepare(catalog,entry,new VerifiedExport.Cancellation() { @Override public boolean cancelled() { return job.cancelled.get() || pauseRequested.get() || SystemClock.elapsedRealtime()>=Math.min(freshness,job.deadline); } },new AndroidCleanupIdentity());
+            encoded=binding.encode(); job.check();
+            if(cleanupRevoked.get()) throw new IOException("Cleanup revoked");
+            queue.cleanup(item,"INTENT",encoded); stage="INTENT";
+            localStep(new LocalAction() { @Override public void run(DirectorySpool spool) throws IOException {
+                job.check(); if(cleanupRevoked.get() || pauseRequested.get() || SystemClock.elapsedRealtime()>=freshness) throw new IOException("Fresh cleanup consent window expired");
+                spool.quarantineVerified(binding);
+            } });
+            queue.cleanup(item,"QUARANTINED",encoded); stage="QUARANTINED";
+            job.check(); if(cleanupRevoked.get() || pauseRequested.get() || SystemClock.elapsedRealtime()>=freshness || !item.revision.equals(queue.cleanupRevision())) throw new IOException("Cleanup stopped before purge authorization");
+            queue.cleanup(item,"PURGING",encoded); stage="PURGING";
+            localStep(new LocalAction() { @Override public void run(DirectorySpool spool) throws IOException {
+                if(pauseRequested.get() || cleanupRevoked.get()) throw new IOException("Cleanup paused or revoked before purge");
+                purgeEntered[0]=true;
+                spool.purgeQuarantine(binding);
+            } });
+            queue.cleanup(item,"REMOVED",encoded);
+        } catch(IOException | RuntimeException e) {
+            // Durable intent records uncertainty. Pre-purge restart restores; partial purge replay
+            // only removes the exact bound remaining objects. Never invent a new proof or attempt.
+            if(stage.equals("PURGING") && !purgeEntered[0]) {
+                try { queue.cleanup(item,"QUARANTINED",encoded); } catch(IOException | RuntimeException failed) { fatal(); }
+            }
+            if(encoded==null || stage.equals("NONE")) {
+                try { queue.cleanup(item,e instanceof CleanupDeferred ? "DEFERRED" : "BLOCKED",null); queue.state(item,"VERIFIED_AT_TIME","Local cleanup deferred or could not establish fresh, stable local identity; source retained",0); }
+                catch(IOException | RuntimeException failed) { fatal(); }
+            }
+        }
+    }
     void uploadNow() {
         command(new Command() { @Override public void run() {
             pauseRequested.set(false); queue.uploadNow(); catchupDeferred = false; postCatchup(); publish("Queued work requested. Charging, unmetered Wi-Fi, runtime permission and trusted TLS remain mandatory.",false);
@@ -265,7 +364,7 @@ final class FtpsCoordinator {
         if (!pauseWriteQueued.compareAndSet(false,true)) return;
         worker.execute(new Runnable() { @Override public void run() {
             try {
-                if (!unavailable) { queue.pause(true); publish("Queue paused. Any started attempt can only be reconciled by readback; originals retained.",false); schedule(-1); }
+                if (!unavailable) { queue.pause(true); publish("Queue paused. Any started attempt can only be reconciled by readback; uncertain sources retained.",false); schedule(-1); }
             } catch (RuntimeException e) { fatal(); }
             finally { pauseWriteQueued.set(false); }
         } });
@@ -281,7 +380,7 @@ final class FtpsCoordinator {
                 }
                 if (!unavailable) {
                     if (pauseRequested.get()) queue.pause(true);
-                    publish(queue.paused() ? "Queue paused; originals retained." : snapshot.notice,false);
+                    publish(queue.paused() ? "Queue paused; uncertain sources retained." : snapshot.notice,false);
                 }
             } catch (RuntimeException e) { fatal(); }
             finally {
@@ -293,6 +392,34 @@ final class FtpsCoordinator {
             }
         } });
         return job;
+    }
+    private boolean recheckDeferred(final Job job) {
+        if(RecorderState.active || ExportCoordinator.cleanupBlocked() || cleanupRevoked.get()) return false;
+        for(final FtpsQueue.Item item:queue.items(false)) {
+            if(!item.state.equals("VERIFIED_AT_TIME") || !(item.cleanupState.equals("DEFERRED") || item.cleanupState.equals("RECHECKING") || item.cleanupState.equals("WAIT_SOURCE")) || !item.revision.equals(queue.cleanupRevision())) continue;
+            if(item.nextAt>System.currentTimeMillis() || queue.otherNeedsSource(item)) continue;
+            char[] secret=null;
+            try {
+                if(item.attempt==null || item.verifiedAt<=0) throw new IOException("Missing prior remote receipt");
+                Network network;
+                try { network=FtpsNetwork.allowed(context,item.bytes,0,true); }
+                catch(IOException | RuntimeException unsafe) { queue.state(item,"VERIFIED_AT_TIME","Cleanup readback waits for transfer safety gates; source retained",System.currentTimeMillis()+300000); return true; }
+                FtpsQueue.Profile profile=queue.profile(item.revision);
+                try { secret=password(profile); } catch(Exception e) { queue.cleanup(item,"WAIT_CREDENTIALS",null); return true; }
+                final CommittedSegments.Entry entry=catalog.load(item.source);
+                if(entry.metadata.wavBytes!=item.bytes || !entry.metadata.wavSha256.equals(item.wavHash) || !FtpsQueue.digest(entry.metadata.encode()).equals(item.metadataHash)) throw new IOException("Source changed");
+                queue.cleanup(item,"RECHECKING",null); // Read-only exact-attempt reconciliation, never a new upload.
+                try(final FtpsNetwork connection=new FtpsNetwork(context,network)) {
+                    job.connection=connection;
+                    FtpsTransfer.Result result=FtpsTransfer.run(catalog,entry,profile.destination,secret,connection,item.revision,item.attempt,true,new FtpsTransfer.Guard() { @Override public void check() throws IOException { job.check(); connection.check(); } });
+                    job.check(); queue.verified(item,result); cleanupFresh(item,entry,job);
+                } finally { job.connection=null; }
+            } catch(IOException | RuntimeException e) {
+                try { queue.cleanup(item,"BLOCKED",null); } catch(IOException | RuntimeException failed) { fatal(); }
+            } finally { if(secret!=null) Arrays.fill(secret,'\0'); }
+            return true;
+        }
+        return false;
     }
     private char[] password(FtpsQueue.Profile profile) throws Exception {
         char[] session = sessionPasswords.get(profile.revision);
@@ -307,6 +434,8 @@ final class FtpsCoordinator {
     }
     private void runOne(final Job job) {
         if (queue.paused()) return;
+        replayCleanup(); if (unavailable) return;
+        if(recheckDeferred(job)) return;
         List<FtpsQueue.Item> items = queue.items(true); long total = pendingBytes(items), now = System.currentTimeMillis();
         FtpsQueue.Item selected = null;
         for (FtpsQueue.Item item : items) if (item.nextAt <= now && triggered(item,total,now)) { selected = item; break; }
@@ -337,7 +466,7 @@ final class FtpsCoordinator {
             } catch (IOException | RuntimeException e) {
                 if (job.cancelled.get() || SystemClock.elapsedRealtime() >= job.deadline) {
                     queue.state(item,item.state,"Stopped before network I/O; source and queued identity retained",now + 60000);
-                } else queue.state(item,"BLOCKED","Local source identity, metadata or content verification failed. Source mutation is blocked; all originals retained.",0);
+                } else queue.state(item,"BLOCKED","Local source identity, metadata or content verification failed. Source mutation is blocked; uncertain sources retained.",0);
                 return;
             }
             if (item.attempt != null && item.reconciliations >= FtpsQueue.MAX_RECONCILIATIONS) {
@@ -353,7 +482,8 @@ final class FtpsCoordinator {
                 FtpsTransfer.Guard guard = new FtpsTransfer.Guard() { @Override public void check() throws IOException { job.check(); guardedNetwork.check(); } };
                 FtpsTransfer.Result result = FtpsTransfer.run(catalog,entry,profile.destination,secret,connection,item.revision,attempt,item.attempt != null,guard);
                 job.check(); queue.verified(item,result);
-                publish("VERIFIED AT TIME: remote bytes and hashes matched on readback. Originals retained; server durability and future integrity are unproven.",false);
+                cleanupFresh(item,entry,job);
+                publish("VERIFIED AT TIME: remote readback matched. Review the local cleanup state in the receipt; remote future integrity remains unproven.",false);
             } catch (IOException | RuntimeException e) {
                 boolean permanent = e instanceof javax.net.ssl.SSLHandshakeException
                     || e instanceof javax.net.ssl.SSLPeerUnverifiedException
@@ -365,7 +495,7 @@ final class FtpsCoordinator {
                 } else {
                     queue.state(item,"RECONCILE","Outcome unknown. Next attempt only reads the same remote directory; it never resumes writing or creates another attempt.",System.currentTimeMillis() + (60000L << used));
                 }
-                publish("Transfer was interrupted or unverified. All originals retained; any retry is bounded readback-only reconciliation.",false);
+                publish("Transfer was interrupted or unverified. Uncertain sources retained; any retry is bounded readback-only reconciliation.",false);
             } finally { job.connection = null; }
         } catch (IOException e) {
             // A journal begin/commit error forbids all network work; do not guess whether the intent persisted.
@@ -390,6 +520,9 @@ final class FtpsCoordinator {
         List<FtpsQueue.Item> pending = queue.items(true); long total = pendingBytes(pending), soonest = Long.MAX_VALUE, now = System.currentTimeMillis();
         for (FtpsQueue.Item item : pending) if (triggered(item,total,now))
             soonest = Math.min(soonest,Math.max(0,item.nextAt - now));
+        for(FtpsQueue.Item item:queue.items(false)) if(cleanupPending(item)
+            || (!cleanupRevoked.get() && item.revision.equals(queue.cleanupRevision()) && (item.cleanupState.equals("DEFERRED") || item.cleanupState.equals("RECHECKING") || (item.cleanupState.equals("WAIT_SOURCE") && !queue.otherNeedsSource(item)))))
+            soonest=Math.min(soonest,Math.max((RecorderState.active || ExportCoordinator.cleanupBlocked()) ? 300000 : 5000,item.nextAt-now));
         // Persist a wake while catch-up remains, covering death between confirmations.
         if (queue.automaticRevision() != null && catchup != null && !catchup.isEmpty() && !catchupDeferred)
             soonest = Math.min(soonest,300000);
@@ -410,7 +543,7 @@ final class FtpsCoordinator {
             Snapshot old = snapshot;
             snapshot = new Snapshot(old.page,old.profile,old.items,old.destinations,
                 "Android did not schedule the transfer. Queue is retained; open this screen and request Upload queued now again.",old.busy,old.paused);
-            snapshot.automaticRevision = old.automaticRevision; snapshot.automaticNotice = old.automaticNotice;
+            snapshot.automaticRevision = old.automaticRevision; snapshot.automaticNotice = old.automaticNotice; snapshot.cleanupRevision=old.cleanupRevision; snapshot.cleanupLabel=old.cleanupLabel;
         }
     }
 }

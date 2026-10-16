@@ -27,7 +27,7 @@ final class FtpsControls {
     private final CheckBox remember;
     private final TextView savedProfile, status, receipt;
     private final Spinner sources, queued;
-    private final Button save, load, next, add, upload, pause, automatic;
+    private final Button save, load, next, add, upload, pause, automatic, cleanup;
     private CommittedSegments.Page displayed;
     private FtpsCoordinator.Snapshot rendered;
     private String shownRevision;
@@ -37,7 +37,7 @@ final class FtpsControls {
         this.activity = activity; coordinator = FtpsCoordinator.get(activity);
         coordinator.reschedule(); // Re-open repairs retained intent; never enrolls new recordings.
         text(column,"Explicit FTPS transfer",22);
-        text(column,"Automatic enrollment defaults OFF. Enable explicitly below for existing and future finalized chunks to the shown saved destination, or select individual WAVs. FTPS sends the WAV plus technical segment metadata (capture/run identity, format, input route, timing/sequence and hashes). All originals remain. Cache full still stops recording and alerts; nothing is evicted.",15);
+        text(column,"Automatic enrollment defaults OFF. Enable explicitly below for existing and future finalized chunks to the shown saved destination, or select individual WAVs. FTPS sends the WAV plus technical segment metadata (capture/run identity, format, input route, timing/sequence and hashes). Originals remain unless separate verified-transfer cleanup is enabled. Cache full still stops recording and alerts; nothing is evicted.",15);
         text(column,"Requires charging + unmetered Wi-Fi. Cellular, VPN and ambiguous routes are blocked, including Upload queued now. TLS 1.2+ and trusted hostname certificates are mandatory on control and data. The server must support explicit FTPS, EPSV, protected data connections, new directories and readback. No plain FTP, SMB or active mode.",14);
         host = field(column,"FTPS hostname or IP (certificate must match)","",253,InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
         port = field(column,"Explicit FTPS port","21",5,InputType.TYPE_CLASS_NUMBER);
@@ -51,6 +51,7 @@ final class FtpsControls {
         save = button(column,"Save destination and password",new View.OnClickListener() { @Override public void onClick(View v) { save(); } });
         savedProfile = text(column,"No saved FTPS destination",15);
         automatic = button(column,"Enable automatic enrollment…",new View.OnClickListener() { @Override public void onClick(View v) { confirmAutomatic(); } });
+        cleanup = button(column,"Enable verified-transfer local cleanup…",new View.OnClickListener() { @Override public void onClick(View v) { confirmCleanup(); } });
         load = button(column,"Load / refresh completed WAVs for FTPS",new View.OnClickListener() { @Override public void onClick(View v) { localNotice = ""; coordinator.load(null); } });
         sources = new Spinner(activity); column.addView(sources);
         next = button(column,"Next completed-WAV page",new View.OnClickListener() { @Override public void onClick(View v) {
@@ -71,7 +72,7 @@ final class FtpsControls {
             @Override public void onItemSelected(AdapterView<?> parent,View view,int position,long id) { receipt(); }
             @Override public void onNothingSelected(AdapterView<?> parent) { receipt(); }
         });
-        text(column,"VERIFIED AT TIME means remote readback matched then. It does not prove server persistence, future integrity or deletion eligibility. Interrupted attempts are checked by readback only, up to three times with backoff. Incomplete or conflicting attempts stay blocked; this version never replaces, overwrites or removes remote attempts. Queue/journal behavior, background lifecycle and power-loss durability still need real-device testing.",14);
+        text(column,"VERIFIED AT TIME means remote readback matched then. It does not prove server persistence or future integrity. The separate cleanup opt-in explicitly accepts this risk; it is not strict deletion eligibility. Interrupted attempts are checked by readback only, up to three times with backoff. Incomplete or conflicting attempts stay blocked; this version never replaces, overwrites or removes remote attempts. Queue/journal behavior, background lifecycle and power-loss durability still need real-device testing.",14);
         render();
     }
     private TextView text(LinearLayout parent,String value,int size) {
@@ -113,13 +114,24 @@ final class FtpsControls {
             : "Local-network permission was not granted. FTPS remains blocked; recording controls are independent.";
         render();
     }
+    private void confirmCleanup() {
+        final FtpsCoordinator.Snapshot s=coordinator.snapshot();
+        if(s.cleanupRevision!=null) { coordinator.disableCleanup(); localNotice="Cleanup disable requested; new purge authorization is revoked immediately, durable setting will follow."; render(); return; }
+        if(s.profile==null) return;
+        final String revision=s.profile.revision;
+        new AlertDialog.Builder(activity).setTitle("Delete local audio after verified transfer?")
+            .setMessage("Destination: " + s.profile.label() + "\n\nFor future successful transfers to this exact destination, the app may permanently remove the finalized local WAV and metadata after fresh authenticated full remote readback, hash/size checks and a durable local receipt. Existing verified rows are not retroactively deleted. Cleanup waits while recording is active and performs fresh readback when idle. It does not reclaim space during continuous recording; cache/history limits still stop progress. Starting a new recording may wait for idle cleanup filesystem operations. Partial, changed and unverified sources are excluded.\n\nFTPS cannot prove future remote persistence or prevent server changes/deletion. If the remote copy later disappears, your recording may be unrecoverable. This is a weaker readback-at-time policy, not immutable storage or a backup guarantee.\n\nCleanup uses a recoverable quarantine before purge intent; an already committed partial purge may finish after restart. Disable prevents new cleanup, but cannot restore already deleted audio. Empty ordinal markers and receipts remain. Enable only if you accept this risk.")
+            .setNegativeButton("Cancel",null).setPositiveButton("Enable local deletion for this destination",new DialogInterface.OnClickListener() {
+                @Override public void onClick(DialogInterface dialog,int which) { coordinator.cleanupEnabled(true,revision); }
+            }).show();
+    }
     private void confirmAutomatic() {
         final FtpsCoordinator.Snapshot s = coordinator.snapshot();
         if (s.automaticRevision != null) { coordinator.automatic(false,null); return; }
         if (s.profile == null || !ensureLanPermission()) return;
         final String revision = s.profile.revision;
         new AlertDialog.Builder(activity).setTitle("Automatically enroll completed recordings?")
-            .setMessage("Destination: " + s.profile.label() + "\n\nExisting and future finalized WAV chunks plus technical metadata (capture/run identity, format, input route, timing/sequence and hashes) may transfer in the background. This destination stays pinned even if you save another profile. Charging, unmetered Wi-Fi, permission and trusted TLS remain required. Transfer threshold: 9,600,000 pending bytes; a smaller tail needs Upload queued now.\n\nAll originals remain. Queue history is capped at 500 rows; reaching it disables enrollment without deleting anything. Catch-up is bounded and waits while recording owns the spool. This does not start the microphone or save credentials. Disable stops new enrollment; Pause stops already queued transfers.")
+            .setMessage("Destination: " + s.profile.label() + "\n\nExisting and future finalized WAV chunks plus technical metadata (capture/run identity, format, input route, timing/sequence and hashes) may transfer in the background. This destination stays pinned even if you save another profile. Charging, unmetered Wi-Fi, permission and trusted TLS remain required. Transfer threshold: 9,600,000 pending bytes; a smaller tail needs Upload queued now.\n\nOriginals remain unless separate verified-transfer cleanup is enabled. Queue history is capped at 500 rows; reaching it disables enrollment without deleting anything. Catch-up is bounded and waits while recording owns the spool. This does not start the microphone or save credentials. Disable stops new enrollment; Pause stops already queued transfers.")
             .setNegativeButton("Cancel",null).setPositiveButton("Enable for this destination",new DialogInterface.OnClickListener() {
                 @Override public void onClick(DialogInterface dialog,int which) { localNotice = ""; coordinator.automatic(true,revision); }
             }).show();
@@ -136,7 +148,7 @@ final class FtpsControls {
         final String revision = shownRevision; CommittedSegments.Entry entry = selectedPage.entries.get(index);
         new AlertDialog.Builder(activity).setTitle("Send this completed recording by FTPS?")
             .setMessage(entry.suggestedName() + "\n" + entry.metadata.wavBytes + " WAV bytes\n\nDestination: " + s.profile.label()
-                + "\n\nThe WAV and technical segment metadata may transfer in the background when charging on unmetered Wi-Fi. A new attempt directory will be created under this saved directory. All originals remain. No other recording is enrolled.")
+                + "\n\nThe WAV and technical segment metadata may transfer in the background when charging on unmetered Wi-Fi. A new attempt directory will be created under this saved directory. Originals remain unless separate verified-transfer cleanup is enabled. No other recording is enrolled.")
             .setNegativeButton("Cancel",null).setPositiveButton("Queue this recording",new DialogInterface.OnClickListener() {
                 @Override public void onClick(DialogInterface dialog,int which) { localNotice = ""; coordinator.enqueue(selectedPage,index,revision); }
             }).show();
@@ -168,6 +180,8 @@ final class FtpsControls {
             if (!labels.isEmpty()) queued.setSelection(restore); receipt();
         }
         boolean available = !s.busy && !coordinator.commandPending();
+        cleanup.setEnabled(s.cleanupRevision!=null || (available && s.profile!=null));
+        cleanup.setText(s.cleanupRevision==null ? "Enable verified-transfer local cleanup…" : "Disable new local cleanup");
         automatic.setEnabled(available && (s.profile != null || s.automaticRevision != null));
         automatic.setText(s.automaticRevision == null ? "Enable automatic enrollment…" : "Disable new automatic enrollment");
         save.setEnabled(available); load.setEnabled(available); next.setEnabled(available && displayed != null && displayed.hasMore);
@@ -175,7 +189,7 @@ final class FtpsControls {
         upload.setEnabled(available && (!s.items.isEmpty() || s.paused)); pause.setEnabled(!s.paused || s.busy);
         String pageInfo = displayed == null ? "" : "\nCompleted page: " + displayed.entries.size() + "; rejected entries: " + displayed.rejected;
         status.setText((localNotice.isEmpty() ? "" : localNotice + "\n") + s.notice + "\nQueue records: " + s.items.size()
-            + (s.paused ? " · PAUSED" : "") + "\nAutomatic enrollment: " + s.automaticNotice + pageInfo);
+            + (s.paused ? " · PAUSED" : "") + "\nAutomatic enrollment: " + s.automaticNotice + "\nLocal cleanup: " + s.cleanupLabel + pageInfo);
     }
     private void receipt() {
         if (rendered == null) return; int index = queued.getSelectedItemPosition();
@@ -190,6 +204,6 @@ final class FtpsControls {
             + (item.nextAt == 0 ? "" : "\nNext eligible check: " + new java.util.Date(item.nextAt))
             + (item.verifiedAt == 0 ? "" : "\nVerified at: " + new java.util.Date(item.verifiedAt)
                 + "\nTransport metadata SHA-256: " + item.resultMetadataHash + "\nMarker SHA-256: " + item.markerHash)
-            + "\nOriginals retained. No deletion authorization.");
+            + "\nLocal cleanup: " + item.cleanupState + " (separate explicit opt-in; remote future persistence unproven)");
     }
 }

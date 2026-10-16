@@ -67,7 +67,7 @@ public final class MainActivity extends Activity {
         column.setOrientation(LinearLayout.VERTICAL); int pad = (int) (20 * getResources().getDisplayMetrics().density); column.setPadding(pad,pad,pad,pad);
         scroll.addView(column); setContentView(scroll);
         text(column,"Recorder · development build",24);
-        text(column,"Visible phone microphone recording. PCM16 WAV in private local storage. Automatic FTPS enrollment is OFF. No deletion. Manual SAF export and explicitly queued FTPS are available below. Screen-off and long-run behavior are unverified.",16);
+        text(column,"Visible phone microphone recording. PCM16 WAV in private local storage. Automatic FTPS enrollment and local cleanup default OFF; review their current settings below. Manual SAF export and FTPS controls are available below. Screen-off and long-run behavior are unverified.",16);
         rate = number(column,"Sample rate (Hz)",String.valueOf(defaults.rate),101);
         channels = number(column,"Channels: 1 mono or 2 stereo",String.valueOf(defaults.channels),102);
         seconds = number(column,"Segment duration (seconds)",String.valueOf(defaults.seconds),103);
@@ -81,7 +81,7 @@ public final class MainActivity extends Activity {
         pause = button(column,"Pause",new View.OnClickListener() { @Override public void onClick(View v) { command(RecordingService.PAUSE); } });
         stop = button(column,"Stop",new View.OnClickListener() { @Override public void onClick(View v) { command(RecordingService.STOP); } });
         status = text(column,"Idle",16);
-        text(column,"Pause ends this AudioRecord run. Resume within the same process uses a new run and uncertain epoch. After process restart, Start creates a fresh capture. Stop ends the capture. App recreation never restarts recording. Completed files can be copied with the manual export controls below; all originals remain app-private.",14);
+        text(column,"Pause ends this AudioRecord run. Resume within the same process uses a new run and uncertain epoch. After process restart, Start creates a fresh capture. Stop ends the capture. App recreation never restarts recording. Completed files can be copied with the manual export controls below; originals remain app-private unless separate verified-transfer cleanup is enabled.",14);
         text(column,"Android may let you dismiss the ongoing notification. A swipe alone does not stop recording or trigger forced reposts. Reopen this app for Stop/Pause; Android microphone/active-app controls remain available where supported.",14);
         exports = new ExportControls(this,column,saved);
         ftps = new FtpsControls(this,column);

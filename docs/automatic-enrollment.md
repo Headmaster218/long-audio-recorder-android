@@ -1,3 +1,5 @@
+> Dev9 historical enrollment behavior. Dev10 adds separate default-off [idle verified-transfer local cleanup](verified-local-cleanup.md); originals are retained unless that distinct policy is enabled.
+
 # Opt-in automatic FTPS enrollment (dev9)
 
 This source slice adds automatic queue enrollment, not device-qualified all-day

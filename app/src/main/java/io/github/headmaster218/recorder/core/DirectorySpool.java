@@ -148,7 +148,7 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
             for (Path p : entries) {
                 String name = p.getFileName().toString(); if (!name.startsWith(prefix)) continue;
                 String suffix = name.substring(prefix.length());
-                if (!suffix.matches("[0-9]+\\.(part|ready)")) throw new IOException("malformed sequence reservation");
+                if (!suffix.matches("[0-9]+\\.(part|ready|quarantine|retired)")) throw new IOException("malformed sequence reservation");
                 try {
                     long used = Long.parseLong(suffix.substring(0, suffix.indexOf('.')));
                     if (used == Long.MAX_VALUE) throw new IOException("sequence exhausted");
@@ -159,7 +159,7 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
         return next;
     }
     private Path object(String name) throws IOException {
-        if (name == null || !name.matches("segment-[0-9a-f]{64}-[0-9]+\\.(part|ready)"))
+        if (name == null || !name.matches("segment-[0-9a-f]{64}-[0-9]+\\.(part|ready|quarantine|retired)"))
             throw new IOException("invalid local object identity");
         Path p = root.resolve(name);
         if (!Files.isDirectory(p, LinkOption.NOFOLLOW_LINKS)) throw new IOException("missing/invalid object directory");
@@ -298,6 +298,9 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
         try (DirectoryStream<Path> dirs = Files.newDirectoryStream(root)) {
             for (Path p : dirs) {
                 String name = p.getFileName().toString(); if (name.equals(".writer.lock")) continue;
+                if (name.matches("segment-[0-9a-f]{64}-[0-9]+\\.retired") && Files.isDirectory(p,LinkOption.NOFOLLOW_LINKS)) {
+                    try (DirectoryStream<Path> retired = Files.newDirectoryStream(p)) { if (!retired.iterator().hasNext()) continue; }
+                }
                 Recovery result;
                 try {
                     Path dir = object(name);
@@ -361,6 +364,10 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
             finally { done = true; wav.close(); }
         }
     }
+    /** Production cleanup requires an exclusively owned idle spool; never invoke during capture. */
+    public void quarantineVerified(VerifiedLocalCleanup.Prepared binding) throws IOException { live(); VerifiedLocalCleanup.quarantine(root,protocol,binding); }
+    public void restoreQuarantine(VerifiedLocalCleanup.Prepared binding) throws IOException { live(); VerifiedLocalCleanup.restore(root,protocol,binding); }
+    public void purgeQuarantine(VerifiedLocalCleanup.Prepared binding) throws IOException { live(); VerifiedLocalCleanup.purge(root,protocol,binding); }
     @Override public void close() throws IOException {
         if (closed) return;
         try { if (active != null) active.preserve(); }

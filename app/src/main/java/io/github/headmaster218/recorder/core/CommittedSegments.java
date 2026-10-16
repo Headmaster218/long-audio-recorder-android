@@ -60,6 +60,7 @@ public final class CommittedSegments {
         if (root == null) throw new IllegalArgumentException();
         this.root = root.toAbsolutePath().normalize();
     }
+    Path rootPath() { return root; }
     private void safeRoot() throws IOException {
         // The caller supplies Context.getFilesDir().toPath().toRealPath() as the trusted anchor.
         // Validate every component of the supplied canonical path, including the spool itself.

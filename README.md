@@ -2,9 +2,11 @@
 
 # Android recorder
 
-Version: **0.1.0-dev9** (opt-in automatic FTPS queue source candidate; unsigned build only, not device-qualified).
+Version: **0.1.0-dev10** (explicit opt-in verified-transfer cleanup source candidate; unsigned build only, not device-qualified).
 
-Dev9 adds destination-pinned, explicit opt-in enrollment of existing and future finalized chunks. See [automatic queue scope, tests and limits](docs/automatic-enrollment.md). All originals remain; no automatic deletion or recording restart is added.
+Dev10 adds separate default-off, destination-pinned readback-at-time local cleanup. It runs only while recording is idle and leaves permanent sequence reservations and receipts. Remote future loss remains a disclosed risk. See [cleanup consent, crash behavior and remaining limits](docs/verified-local-cleanup.md). This does not yet provide continuous all-day rolling reclamation.
+
+Dev9 adds destination-pinned, explicit opt-in enrollment of existing and future finalized chunks. See [automatic queue scope, tests and limits](docs/automatic-enrollment.md). Originals remain unless the separate dev10 cleanup policy is enabled; no recording restart is added.
 
 Dev7 adds bounded producer-side capture observations inside a version-2 manifest.
 New readers preserve old version-1 metadata bytes exactly; older apps cannot read
@@ -74,7 +76,7 @@ power-loss/process-death durability, sustained performance or 24-hour capture.
 The Android source now wires the reviewed storage layer to microphone capture.
 Manual SAF export remains implemented. The dev6 FTPS source candidate adds
 explicitly selected, policy-gated transfers with readback-at-time receipts.
-Immutable server handoff and recording deletion remain unimplemented.
+Immutable server handoff remains unimplemented; dev10 cleanup uses the separately disclosed weaker readback-at-time policy.
 
 ## Android development app
 
@@ -87,7 +89,7 @@ fresh official-SDK unsigned build. These checks do not run Android lifecycle,
 permissions, AudioRecord, notifications or filesystem behavior.
 
 Missing product functions include SMB,
-plain FTP, cellular transfer/quotas, deletion eligibility, retention/deletion,
+plain FTP, cellular transfer/quotas, strict deletion eligibility, continuous-recording reclamation,
 durable cross-process recording resume, headset input selection and
 complete runtime event history. Windows builds, Xiaomi/OEM behavior, UI usability,
 screen-off recording, real process/power loss, battery/thermal behavior and
@@ -114,8 +116,8 @@ Run `sh scripts/test-export.sh` for the new host logic tests.
 Save a destination, select a completed WAV, and confirm that exact saved
 destination, or explicitly enable automatic enrollment for that saved destination. Authorized queued recordings may transfer while charging
 on unmetered Wi-Fi. The fixed trigger is 9,600,000 pending WAV bytes or explicit
-Upload queued now. All sources remain, including after verified readback.
-Automatic enrollment defaults OFF. There is no local/remote deletion, plain FTP or SMB.
+Upload queued now. Sources remain unless the separate verified-transfer local cleanup opt-in applies.
+Automatic enrollment defaults OFF. There is no remote deletion, plain FTP or SMB. Local cleanup is a separate default-off control.
 
 Run `python scripts/run-ftps-checks.py` for bounded, offline host/source checks.
 The optional official-SDK source compilation requires `--sdk` and

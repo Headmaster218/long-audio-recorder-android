@@ -23,6 +23,7 @@ final class ExportCoordinator {
         if (instance == null) instance = new ExportCoordinator(c.getApplicationContext());
         return instance;
     }
+    static synchronized boolean cleanupBlocked() { return instance!=null && instance.session.snapshot().busy(); }
     final ExportSession session = new ExportSession();
     private final Context context;
     private final SharedPreferences journal;
@@ -51,7 +52,9 @@ final class ExportCoordinator {
         } });
     }
     String choose(CommittedSegments.Page displayedPage, int index) {
-        String token = session.choose(displayedPage, index); if (token == null) return null;
+        String token;
+        synchronized(SpoolAdmission.LOCK) { token=session.choose(displayedPage,index); }
+        if (token == null) return null;
         // Marker is committed before handing control to another app. No audio or target URI is stored here.
         if (!journal.edit().putBoolean("in-flight", true).commit()) {
             session.pickerCancelled(token, "Could not save export interruption marker; export has not started."); return null;

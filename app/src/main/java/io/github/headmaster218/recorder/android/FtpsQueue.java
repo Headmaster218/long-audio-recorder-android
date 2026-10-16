@@ -33,6 +33,8 @@ final class FtpsQueue extends SQLiteOpenHelper {
         final String source, revision, wavHash, metadataHash, state, attempt, detail, resultMetadataHash, markerHash;
         final int reconciliations;
         final boolean uploadNow;
+        final String cleanupState;
+        final byte[] cleanupBinding;
         Item(Cursor c) {
             key = c.getLong(0); source = c.getString(1); revision = c.getString(2); wavHash = c.getString(3);
             metadataHash = c.getString(4); bytes = c.getLong(5); queuedAt = c.getLong(6); state = c.getString(7);
@@ -40,11 +42,12 @@ final class FtpsQueue extends SQLiteOpenHelper {
             uploadNow = c.getInt(11) != 0; detail = c.getString(12);
             resultMetadataHash = c.isNull(13) ? null : c.getString(13); markerHash = c.isNull(14) ? null : c.getString(14);
             verifiedAt = c.isNull(15) ? 0 : c.getLong(15);
+            cleanupState = c.getString(16); cleanupBinding = c.isNull(17) ? null : c.getBlob(17);
         }
     }
     FtpsQueue(Context c) {
         // Queue, profiles and encrypted credentials are excluded from backup independently of manifest settings.
-        super(c, new File(c.getNoBackupFilesDir(), "ftps-queue.db").getAbsolutePath(), null, 2);
+        super(c, new File(c.getNoBackupFilesDir(), "ftps-queue.db").getAbsolutePath(), null, 3);
     }
     @Override public void onConfigure(SQLiteDatabase db) {
         db.setForeignKeyConstraintsEnabled(true);
@@ -52,17 +55,45 @@ final class FtpsQueue extends SQLiteOpenHelper {
     }
     @Override public void onCreate(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE profiles(revision TEXT PRIMARY KEY, host TEXT NOT NULL, port INTEGER NOT NULL, user TEXT NOT NULL, directory TEXT NOT NULL, credential BLOB)");
-        db.execSQL("CREATE TABLE settings(id INTEGER PRIMARY KEY CHECK(id=1), current_revision TEXT REFERENCES profiles(revision), paused INTEGER NOT NULL DEFAULT 0, auto_revision TEXT REFERENCES profiles(revision), auto_notice TEXT NOT NULL DEFAULT 'OFF')");
+        db.execSQL("CREATE TABLE settings(id INTEGER PRIMARY KEY CHECK(id=1), current_revision TEXT REFERENCES profiles(revision), paused INTEGER NOT NULL DEFAULT 0, auto_revision TEXT REFERENCES profiles(revision), auto_notice TEXT NOT NULL DEFAULT 'OFF', cleanup_revision TEXT REFERENCES profiles(revision))");
         db.execSQL("INSERT INTO settings(id,paused) VALUES(1,0)");
-        db.execSQL("CREATE TABLE queue(id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, revision TEXT NOT NULL REFERENCES profiles(revision), wav_hash TEXT NOT NULL, metadata_hash TEXT NOT NULL, bytes INTEGER NOT NULL, queued_at INTEGER NOT NULL, state TEXT NOT NULL, attempt TEXT, reconciliations INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL DEFAULT 0, upload_now INTEGER NOT NULL DEFAULT 0, detail TEXT NOT NULL, result_metadata_hash TEXT, marker_hash TEXT, verified_at INTEGER, UNIQUE(source,revision))");
+        db.execSQL("CREATE TABLE queue(id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, revision TEXT NOT NULL REFERENCES profiles(revision), wav_hash TEXT NOT NULL, metadata_hash TEXT NOT NULL, bytes INTEGER NOT NULL, queued_at INTEGER NOT NULL, state TEXT NOT NULL, attempt TEXT, reconciliations INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL DEFAULT 0, upload_now INTEGER NOT NULL DEFAULT 0, detail TEXT NOT NULL, result_metadata_hash TEXT, marker_hash TEXT, verified_at INTEGER, cleanup_state TEXT NOT NULL DEFAULT 'NONE', cleanup_binding BLOB, UNIQUE(source,revision))");
         db.execSQL("CREATE INDEX runnable ON queue(state,next_at,id)");
     }
     @Override public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
-        if (oldVersion == 1 && newVersion == 2) {
+        if (oldVersion < 1 || oldVersion > 2 || newVersion != 3) throw new IllegalStateException("Unsupported FTPS queue migration");
+        if (oldVersion == 1) {
             db.execSQL("ALTER TABLE settings ADD COLUMN auto_revision TEXT REFERENCES profiles(revision)");
             db.execSQL("ALTER TABLE settings ADD COLUMN auto_notice TEXT NOT NULL DEFAULT 'OFF'");
-        } else throw new IllegalStateException("Unsupported FTPS queue migration");
+        }
+        db.execSQL("ALTER TABLE settings ADD COLUMN cleanup_revision TEXT REFERENCES profiles(revision)");
+        db.execSQL("ALTER TABLE queue ADD COLUMN cleanup_state TEXT NOT NULL DEFAULT 'NONE'");
+        db.execSQL("ALTER TABLE queue ADD COLUMN cleanup_binding BLOB");
     }
+    String cleanupRevision() {
+        try (Cursor c = getReadableDatabase().rawQuery("SELECT cleanup_revision FROM settings WHERE id=1",null)) { c.moveToFirst(); return c.isNull(0) ? null : c.getString(0); }
+    }
+    void cleanupRevision(String revision) {
+        ContentValues v=new ContentValues(); v.put("cleanup_revision",revision); getWritableDatabase().update("settings",v,"id=1",null);
+    }
+    void revokeCleanup() {
+        SQLiteDatabase db=getWritableDatabase(); db.beginTransaction();
+        try {
+            cleanupRevision(null);
+            db.execSQL("UPDATE queue SET cleanup_state='RETAINED' WHERE cleanup_state IN ('DEFERRED','RECHECKING','WAIT_CREDENTIALS','WAIT_SOURCE')");
+            db.execSQL("UPDATE queue SET cleanup_state='RESTORE_ONLY' WHERE cleanup_state IN ('INTENT','QUARANTINED')");
+            db.setTransactionSuccessful();
+        } finally { db.endTransaction(); }
+    }
+    boolean otherNeedsSource(Item item) {
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT id FROM queue WHERE source=? AND id<>? AND state<>'VERIFIED_AT_TIME' LIMIT 1",new String[]{item.source,String.valueOf(item.key)})) { return c.moveToFirst(); }
+    }
+    void cleanup(Item item, String state, byte[] binding) throws IOException {
+        ContentValues v=new ContentValues(); v.put("cleanup_state",state); v.put("cleanup_binding",binding);
+        if(getWritableDatabase().update("queue",v,"id=? AND state='VERIFIED_AT_TIME' AND attempt IS NOT NULL AND verified_at IS NOT NULL",new String[]{String.valueOf(item.key)})!=1)
+            throw new IOException("Cleanup receipt ownership unavailable");
+    }
+
     static String digest(byte[] bytes) {
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256").digest(bytes);
@@ -139,7 +170,7 @@ final class FtpsQueue extends SQLiteOpenHelper {
     List<Item> items(boolean runnableOnly) {
         List<Item> result = new ArrayList<Item>();
         String where = runnableOnly ? " WHERE state IN ('QUEUED','RECONCILE')" : "";
-        try (Cursor c = getReadableDatabase().rawQuery("SELECT id,source,revision,wav_hash,metadata_hash,bytes,queued_at,state,attempt,reconciliations,next_at,upload_now,detail,result_metadata_hash,marker_hash,verified_at FROM queue" + where + " ORDER BY id",null)) {
+        try (Cursor c = getReadableDatabase().rawQuery("SELECT id,source,revision,wav_hash,metadata_hash,bytes,queued_at,state,attempt,reconciliations,next_at,upload_now,detail,result_metadata_hash,marker_hash,verified_at,cleanup_state,cleanup_binding FROM queue" + where + " ORDER BY id",null)) {
             while (c.moveToNext()) result.add(new Item(c));
         }
         return result;
@@ -155,6 +186,7 @@ final class FtpsQueue extends SQLiteOpenHelper {
         ContentValues v = new ContentValues(); v.put("paused",value ? 1 : 0); getWritableDatabase().update("settings",v,"id=1",null);
     }
     void credentialsReady(String revision) {
+        getWritableDatabase().execSQL("UPDATE queue SET cleanup_state='DEFERRED' WHERE revision=? AND state='VERIFIED_AT_TIME' AND cleanup_state='WAIT_CREDENTIALS'",new Object[]{revision});
         getWritableDatabase().execSQL("UPDATE queue SET state=CASE WHEN attempt IS NULL THEN 'QUEUED' ELSE 'RECONCILE' END, detail='Credentials supplied; safety gates still apply' WHERE revision=? AND state='NEEDS_CREDENTIALS'",new Object[]{revision});
     }
     void uploadNow() {
@@ -185,7 +217,7 @@ final class FtpsQueue extends SQLiteOpenHelper {
         if (!result.verifiedAtTime || result.bytes != item.bytes || !item.wavHash.equals(result.wavSha256))
             throw new IllegalStateException("Invalid verification result");
         ContentValues v = new ContentValues(); v.put("state","VERIFIED_AT_TIME");
-        v.put("detail","Readback verified at this time only; originals retained, no deletion eligibility");
+        v.put("detail","Readback verified at this time only; local cleanup is recorded separately; remote future persistence unproven");
         v.put("result_metadata_hash",result.metadataSha256); v.put("marker_hash",result.markerSha256);
         v.put("verified_at",System.currentTimeMillis());
         if (getWritableDatabase().update("queue",v,"id=?",new String[]{String.valueOf(item.key)}) != 1) throw new IllegalStateException("Queue item disappeared");
