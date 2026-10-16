@@ -1,3 +1,5 @@
+> Historical manual-transfer baseline below. Dev9 adds explicit opt-in automatic enrollment; see [current automatic-queue behavior and limits](automatic-enrollment.md).
+
 # Explicit FTPS source candidate (dev6)
 
 Status: source candidate on the reviewed dev5 documentation baseline

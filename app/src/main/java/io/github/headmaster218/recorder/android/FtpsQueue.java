@@ -44,7 +44,7 @@ final class FtpsQueue extends SQLiteOpenHelper {
     }
     FtpsQueue(Context c) {
         // Queue, profiles and encrypted credentials are excluded from backup independently of manifest settings.
-        super(c, new File(c.getNoBackupFilesDir(), "ftps-queue.db").getAbsolutePath(), null, 1);
+        super(c, new File(c.getNoBackupFilesDir(), "ftps-queue.db").getAbsolutePath(), null, 2);
     }
     @Override public void onConfigure(SQLiteDatabase db) {
         db.setForeignKeyConstraintsEnabled(true);
@@ -52,13 +52,16 @@ final class FtpsQueue extends SQLiteOpenHelper {
     }
     @Override public void onCreate(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE profiles(revision TEXT PRIMARY KEY, host TEXT NOT NULL, port INTEGER NOT NULL, user TEXT NOT NULL, directory TEXT NOT NULL, credential BLOB)");
-        db.execSQL("CREATE TABLE settings(id INTEGER PRIMARY KEY CHECK(id=1), current_revision TEXT REFERENCES profiles(revision), paused INTEGER NOT NULL DEFAULT 0)");
+        db.execSQL("CREATE TABLE settings(id INTEGER PRIMARY KEY CHECK(id=1), current_revision TEXT REFERENCES profiles(revision), paused INTEGER NOT NULL DEFAULT 0, auto_revision TEXT REFERENCES profiles(revision), auto_notice TEXT NOT NULL DEFAULT 'OFF')");
         db.execSQL("INSERT INTO settings(id,paused) VALUES(1,0)");
         db.execSQL("CREATE TABLE queue(id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, revision TEXT NOT NULL REFERENCES profiles(revision), wav_hash TEXT NOT NULL, metadata_hash TEXT NOT NULL, bytes INTEGER NOT NULL, queued_at INTEGER NOT NULL, state TEXT NOT NULL, attempt TEXT, reconciliations INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL DEFAULT 0, upload_now INTEGER NOT NULL DEFAULT 0, detail TEXT NOT NULL, result_metadata_hash TEXT, marker_hash TEXT, verified_at INTEGER, UNIQUE(source,revision))");
         db.execSQL("CREATE INDEX runnable ON queue(state,next_at,id)");
     }
     @Override public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
-        throw new IllegalStateException("FTPS queue migration requires explicit implementation");
+        if (oldVersion == 1 && newVersion == 2) {
+            db.execSQL("ALTER TABLE settings ADD COLUMN auto_revision TEXT REFERENCES profiles(revision)");
+            db.execSQL("ALTER TABLE settings ADD COLUMN auto_notice TEXT NOT NULL DEFAULT 'OFF'");
+        } else throw new IllegalStateException("Unsupported FTPS queue migration");
     }
     static String digest(byte[] bytes) {
         try {
@@ -102,7 +105,24 @@ final class FtpsQueue extends SQLiteOpenHelper {
     private long count(String table) {
         try (Cursor c = getReadableDatabase().rawQuery("SELECT count(*) FROM " + table,null)) { c.moveToFirst(); return c.getLong(0); }
     }
-    boolean enqueue(CommittedSegments.Entry entry, String revision) throws IOException {
+    String automaticRevision() {
+        try (Cursor c = getReadableDatabase().rawQuery("SELECT auto_revision FROM settings WHERE id=1",null)) {
+            c.moveToFirst(); return c.isNull(0) ? null : c.getString(0);
+        }
+    }
+    String automaticNotice() {
+        try (Cursor c = getReadableDatabase().rawQuery("SELECT auto_notice FROM settings WHERE id=1",null)) { c.moveToFirst(); return c.getString(0); }
+    }
+    void automatic(String revision, String notice) {
+        ContentValues v = new ContentValues(); v.put("auto_revision",revision); v.put("auto_notice",notice);
+        getWritableDatabase().update("settings",v,"id=1",null);
+    }
+    boolean contains(String source, String revision) {
+        try (Cursor c = getReadableDatabase().rawQuery("SELECT id FROM queue WHERE source=? AND revision=?",new String[]{source,revision})) { return c.moveToFirst(); }
+    }
+    boolean full() { return count("queue") >= MAX_ROWS; }
+    boolean enqueue(CommittedSegments.Entry entry, String revision) throws IOException { return enqueue(entry,revision,false); }
+    boolean enqueue(CommittedSegments.Entry entry, String revision, boolean automatic) throws IOException {
         SQLiteDatabase db = getWritableDatabase(); db.beginTransaction();
         try {
             try (Cursor c = db.rawQuery("SELECT id FROM queue WHERE source=? AND revision=?", new String[]{entry.id,revision})) {
@@ -112,7 +132,7 @@ final class FtpsQueue extends SQLiteOpenHelper {
             ContentValues v = new ContentValues(); v.put("source",entry.id); v.put("revision",revision);
             v.put("wav_hash",entry.metadata.wavSha256); v.put("metadata_hash",digest(entry.metadata.encode()));
             v.put("bytes",entry.metadata.wavBytes); v.put("queued_at",System.currentTimeMillis());
-            v.put("state","QUEUED"); v.put("detail","Explicitly selected; waiting for transfer trigger and safety gates");
+            v.put("state","QUEUED"); v.put("detail",automatic ? "Automatically enrolled with pinned destination consent; waiting for transfer trigger and safety gates" : "Explicitly selected; waiting for transfer trigger and safety gates");
             db.insertOrThrow("queue",null,v); db.setTransactionSuccessful(); return true;
         } finally { db.endTransaction(); }
     }

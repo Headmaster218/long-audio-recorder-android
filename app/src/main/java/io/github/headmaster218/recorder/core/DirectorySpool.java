@@ -20,6 +20,7 @@ import io.github.headmaster218.recorder.core.SegmentMetadata.Intent;
 
 /** Owned, private directory only. One cooperating owner; no protection against hostile filesystem mutation. */
 public final class DirectorySpool implements SegmentStore, AutoCloseable {
+    private static final VerifiedExport.Cancellation NEVER_CANCEL = new VerifiedExport.Cancellation() { @Override public boolean cancelled() { return false; } };
     public enum Operation { CREATE_STAGE, WRITE_INTENT, SYNC_INTENT, WRITE_HEADER, APPEND_PCM, SYNC_PCM,
         PATCH_HEADER, SYNC_FINAL_WAV, HASH_WAV, WRITE_MANIFEST, SYNC_MANIFEST, SYNC_STAGE, PUBLISH, SYNC_ROOT, VALIDATE }
     public interface Faults { void before(Operation operation, Path path) throws IOException; }
@@ -207,6 +208,10 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
         return Arrays.copyOf(buffer, count);
     }
     private static String[] hashWav(Path p, Intent intent, long frames) throws IOException {
+        return hashWav(p,intent,frames,NEVER_CANCEL);
+    }
+    private static String[] hashWav(Path p, Intent intent, long frames, VerifiedExport.Cancellation cancellation) throws IOException {
+        VerifiedExport.checkCancelled(cancellation);
         if (!regular(p)) throw new IOException("WAV is not a regular file");
         byte[] expectedHeader = WavHeader.encode(intent.epoch.format, frames);
         long expectedSize = Checks.add(intent.epoch.format.bytesForFrames(frames), WavHeader.BYTES);
@@ -218,6 +223,7 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
             if (!Arrays.equals(expectedHeader, header.array())) throw new IOException("WAV header mismatch");
             full.update(header.array()); ByteBuffer block = ByteBuffer.allocate(8192); long seen = WavHeader.BYTES;
             int n; while ((n = c.read(block)) != -1) {
+                VerifiedExport.checkCancelled(cancellation);
                 if (n == 0) throw new IOException("zero-progress WAV read");
                 full.update(block.array(), 0, n); pcm.update(block.array(), 0, n); seen += n; ((java.nio.Buffer) block).clear();
                 if (seen > expectedSize) throw new IOException("WAV changed during verification");
@@ -253,27 +259,36 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
         return manifest;
     }
     private static SegmentMetadata checkManifest(Path directory, Intent intent) throws IOException {
+        return checkManifest(directory,intent,NEVER_CANCEL);
+    }
+    private static SegmentMetadata checkManifest(Path directory, Intent intent, VerifiedExport.Cancellation cancellation) throws IOException {
         SegmentMetadata m = SegmentMetadata.decode(readSmall(directory.resolve(MANIFEST)));
         if (!SegmentMetadata.sameIntent(intent, m.intent)) throw new IOException("manifest/intent mismatch");
-        String[] hashes = hashWav(directory.resolve(WAV), intent, m.frameCount);
+        String[] hashes = hashWav(directory.resolve(WAV), intent, m.frameCount,cancellation);
         if (!m.pcmSha256.equals(hashes[0]) || !m.wavSha256.equals(hashes[1])) throw new IOException("content hash mismatch");
         return m;
     }
-    private SegmentMetadata validate(Path directory) throws IOException {
+    private SegmentMetadata validate(Path directory) throws IOException { return validate(directory,NEVER_CANCEL); }
+    private SegmentMetadata validate(Path directory, VerifiedExport.Cancellation cancellation) throws IOException {
+        VerifiedExport.checkCancelled(cancellation);
         op(Operation.VALIDATE, directory); checkEntries(directory, true);
         Intent intent = SegmentMetadata.decodeIntent(readSmall(directory.resolve(INTENT)));
         if (!directory.getFileName().toString().equals(id(intent) + ".ready")) throw new IOException("object identity mismatch");
-        return checkManifest(directory, intent);
+        return checkManifest(directory, intent,cancellation);
     }
     /** Revalidate and re-sync existing final objects; enumeration alone never grants upload eligibility. */
-    public Published confirmReady(String localObjectId) throws IOException {
+    public Published confirmReady(String localObjectId) throws IOException { return confirmReady(localObjectId,NEVER_CANCEL); }
+    /** Cooperative cancellation bounds hashing; platform fsync itself may still block. */
+    public Published confirmReady(String localObjectId, VerifiedExport.Cancellation cancellation) throws IOException {
+        VerifiedExport.checkCancelled(cancellation);
         live(); if (localObjectId == null || !localObjectId.endsWith(".ready")) throw new IOException("partial objects are ineligible");
-        Path dir = object(localObjectId); SegmentMetadata m = validate(dir);
+        Path dir = object(localObjectId); SegmentMetadata m = validate(dir,cancellation);
         for (String name : new String[] { INTENT, WAV, MANIFEST }) {
+            VerifiedExport.checkCancelled(cancellation);
             try (FileChannel c = FileChannel.open(dir.resolve(name), StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS)) { c.force(true); }
         }
         syncDirectory(Operation.SYNC_STAGE, dir); syncDirectory(Operation.SYNC_ROOT, root);
-        SegmentMetadata finalCheck = validate(dir);
+        SegmentMetadata finalCheck = validate(dir,cancellation);
         if (!Arrays.equals(m.encode(), finalCheck.encode())) throw new IOException("metadata changed during confirmation");
         return new Published(localObjectId, m);
     }

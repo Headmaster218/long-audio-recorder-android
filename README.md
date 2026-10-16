@@ -2,7 +2,9 @@
 
 # Android recorder
 
-Version: **0.1.0-dev7** (capture-observation source candidate; no dev7 APK or release).
+Version: **0.1.0-dev9** (opt-in automatic FTPS queue source candidate; unsigned build only, not device-qualified).
+
+Dev9 adds destination-pinned, explicit opt-in enrollment of existing and future finalized chunks. See [automatic queue scope, tests and limits](docs/automatic-enrollment.md). All originals remain; no automatic deletion or recording restart is added.
 
 Dev7 adds bounded producer-side capture observations inside a version-2 manifest.
 New readers preserve old version-1 metadata bytes exactly; older apps cannot read
@@ -84,7 +86,7 @@ addition to all policy/storage regressions, four source-wiring checks and a
 fresh official-SDK unsigned build. These checks do not run Android lifecycle,
 permissions, AudioRecord, notifications or filesystem behavior.
 
-Missing product functions include automatic enrollment of all recordings, SMB,
+Missing product functions include SMB,
 plain FTP, cellular transfer/quotas, deletion eligibility, retention/deletion,
 durable cross-process recording resume, headset input selection and
 complete runtime event history. Windows builds, Xiaomi/OEM behavior, UI usability,
@@ -110,10 +112,10 @@ Run `sh scripts/test-export.sh` for the new host logic tests.
 ## Explicit FTPS source candidate
 
 Save a destination, select a completed WAV, and confirm that exact saved
-destination. Only these explicitly queued recordings may transfer, while charging
+destination, or explicitly enable automatic enrollment for that saved destination. Authorized queued recordings may transfer while charging
 on unmetered Wi-Fi. The fixed trigger is 9,600,000 pending WAV bytes or explicit
 Upload queued now. All sources remain, including after verified readback.
-There is no automatic enrollment, local/remote deletion, plain FTP or SMB.
+Automatic enrollment defaults OFF. There is no local/remote deletion, plain FTP or SMB.
 
 Run `python scripts/run-ftps-checks.py` for bounded, offline host/source checks.
 The optional official-SDK source compilation requires `--sdk` and

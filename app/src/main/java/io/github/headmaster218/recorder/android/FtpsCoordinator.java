@@ -10,6 +10,12 @@ import android.os.Looper;
 import android.os.Process;
 import android.os.SystemClock;
 import java.io.IOException;
+import java.nio.file.Path;
+import java.util.ArrayDeque;
+import java.util.concurrent.Semaphore;
+import io.github.headmaster218.recorder.core.DirectorySpool;
+import io.github.headmaster218.recorder.core.CachePolicy;
+import io.github.headmaster218.recorder.core.SegmentStore;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -38,6 +44,7 @@ final class FtpsCoordinator {
         final Map<String,String> destinations;
         final String notice;
         final boolean busy, paused;
+        String automaticRevision, automaticNotice = "OFF";
         Snapshot(CommittedSegments.Page page,FtpsQueue.Profile profile,List<FtpsQueue.Item> items,
                 Map<String,String> destinations,String notice,boolean busy,boolean paused) {
             this.page = page; this.profile = profile; this.items = Collections.unmodifiableList(items);
@@ -77,13 +84,101 @@ final class FtpsCoordinator {
     private volatile Job activeJob;
     private volatile Snapshot snapshot = new Snapshot(null,null,new ArrayList<FtpsQueue.Item>(),new HashMap<String,String>(),"Loading local transfer state",false,false);
     private boolean unavailable;
+    private final Semaphore notifications = new Semaphore(32);
+    private final AtomicBoolean overflow = new AtomicBoolean();
+    private final AtomicBoolean catchupPosted = new AtomicBoolean();
+    private ArrayDeque<String> catchup;
+    private boolean catchupDeferred;
+    private Path spoolRoot() throws IOException { return context.getFilesDir().toPath().toRealPath().resolve("audio-spool"); }
+    private void automaticBlocked(String reason) {
+        queue.automatic(null,reason + "; enrollment OFF; originals and existing queue retained. Review and enable again.");
+        catchup = null; catchupDeferred = false;
+    }
+    void automatic(final boolean enabled, final String shownRevision) {
+        command(new Command() { @Override public void run() throws IOException {
+            FtpsQueue.Profile current = queue.current();
+            if (enabled && (current == null || !current.revision.equals(shownRevision))) {
+                publish("Destination changed; review and enable again.",false); return;
+            }
+            queue.automatic(enabled ? shownRevision : null,enabled ? "ON: pinned to " + current.label() : "OFF: already queued work remains authorized; Pause stops transfers");
+            catchup = null; catchupDeferred = false;
+            if (enabled) { try { prepareCatchup(); } catch (IOException e) { automaticBlocked("Discovery bounds or validation failed"); } }
+            publish("Automatic enrollment setting saved. Originals retained.",false);
+            postCatchup();
+        } });
+    }
+    private void prepareCatchup() throws IOException {
+        String revision = queue.automaticRevision(); if (revision == null) return;
+        catchup = io.github.headmaster218.recorder.core.FinalizedDiscovery.candidates(spoolRoot(),new io.github.headmaster218.recorder.core.FinalizedDiscovery.Known() { @Override public boolean contains(String id) { return queue.contains(id,revision); } },4096,FtpsQueue.MAX_ROWS);
+    }
+
+    private void postCatchup() {
+        if (catchup == null || catchup.isEmpty() || catchupDeferred || !catchupPosted.compareAndSet(false,true)) return;
+        main.postDelayed(new Runnable() { @Override public void run() {
+            worker.execute(new Runnable() { @Override public void run() {
+                catchupPosted.set(false);
+                try { catchupOne(); if (!unavailable) { publish(snapshot.notice,false); schedule(nextDelay()); postCatchup(); } }
+                catch (IOException | RuntimeException e) {
+                    try {
+                        if (pauseRequested.get() || queue.paused()) { catchupDeferred = true; publish("Catch-up paused; consent and originals retained.",false); }
+                        else { automaticBlocked("Catch-up confirmation failed"); publish("Catch-up stopped safely",false); }
+                    } catch (RuntimeException failure) { fatal(); }
+                }
+            } });
+        } },1000);
+    }
+    private void catchupOne() throws IOException {
+        if (unavailable || queue.automaticRevision() == null || catchup == null || catchup.isEmpty()) return;
+        if (queue.paused() || pauseRequested.get()) { catchupDeferred = true; return; }
+        String revision = queue.automaticRevision(), id = catchup.peek();
+        if (queue.contains(id,revision)) { catchup.remove(); return; }
+        if (queue.full()) { automaticBlocked("500-row queue history bound reached"); return; }
+        synchronized (SpoolAdmission.LOCK) {
+            DirectorySpool owned;
+            try { owned = new DirectorySpool(spoolRoot(),new CachePolicy(RecordingSettings.defaults().cacheBytes,RecordingSettings.FREE_RESERVE),new AndroidDirectoryProtocol(),new DirectorySpool.Faults() { @Override public void before(DirectorySpool.Operation operation,Path path) { } }); }
+            catch (IOException e) {
+                catchupDeferred = true;
+                queue.automatic(revision,"ON: catch-up deferred until recording closes or app restarts; spool unavailable/owned. New finalized chunks still enroll."); return;
+            }
+            final long deadline = SystemClock.elapsedRealtime() + 10000;
+            try (DirectorySpool spool = owned) { spool.confirmReady(id,new io.github.headmaster218.recorder.core.VerifiedExport.Cancellation() { @Override public boolean cancelled() { return SystemClock.elapsedRealtime() >= deadline || pauseRequested.get(); } }); }
+        }
+        queue.enqueue(catalog.load(id),revision,true); catchup.remove();
+    }
+    void captureClosed() {
+        if (!catchupPosted.compareAndSet(false,true)) return;
+        worker.execute(new Runnable() { @Override public void run() {
+            catchupPosted.set(false); catchupDeferred = false; postCatchup();
+        } });
+    }
+    void published(final SegmentStore.Published published) {
+        // Never block the capture writer or build an unbounded executor backlog.
+        if (!notifications.tryAcquire()) { overflow.set(true); return; }
+        worker.execute(new Runnable() { @Override public void run() {
+            try {
+                if (unavailable) return;
+                if (overflow.getAndSet(false)) automaticBlocked("Finalize notification bound reached");
+                String revision = queue.automaticRevision();
+                if (revision != null) {
+                    CommittedSegments.Entry entry = catalog.load(published.localObjectId);
+                    if (!Arrays.equals(entry.metadata.encode(),published.metadata.encode())) throw new IOException("Published identity changed");
+                    queue.enqueue(entry,revision,true); publish("Finalized chunk enrolled automatically; transfer policy and hard gates still apply.",false); schedule(nextDelay());
+                }
+            } catch (IOException | RuntimeException e) {
+                try { automaticBlocked("Automatic enrollment failed or queue history is full"); publish("Automatic enrollment stopped safely",false); }
+                catch (RuntimeException failure) { fatal(); }
+            } finally { notifications.release(); }
+        } });
+    }
     private FtpsCoordinator(Context context) {
         this.context = context;
         worker.execute(new Runnable() { @Override public void run() {
             try {
                 queue = new FtpsQueue(FtpsCoordinator.this.context); queue.getWritableDatabase(); queue.recover();
                 catalog = new CommittedSegments(FtpsCoordinator.this.context.getFilesDir().toPath().toRealPath().resolve("audio-spool"));
-                publish("Automatic enrollment is OFF. Only WAVs explicitly queued to a shown profile can transfer.",false);
+                try { prepareCatchup(); postCatchup(); }
+                catch (IOException e) { automaticBlocked("Discovery failed"); }
+                publish("Transfer state restored. Review automatic enrollment status below.",false);
                 schedule(nextDelay()); // Repairs a crash after queue commit but before scheduler submission.
             } catch (IOException | RuntimeException e) { fatal(); }
         } });
@@ -101,7 +196,13 @@ final class FtpsCoordinator {
         for (FtpsQueue.Item item : items) if (!destinations.containsKey(item.revision)) {
             FtpsQueue.Profile p = queue.profile(item.revision); destinations.put(item.revision,p == null ? "Missing profile" : p.label());
         }
-        snapshot = new Snapshot(page,queue.current(),items,destinations,notice,busy,queue.paused());
+        Snapshot updated = new Snapshot(page,queue.current(),items,destinations,notice,busy,queue.paused());
+        updated.automaticRevision = queue.automaticRevision(); updated.automaticNotice = queue.automaticNotice();
+        if (updated.automaticRevision != null) {
+            FtpsQueue.Profile pinned = queue.profile(updated.automaticRevision);
+            updated.automaticNotice += "\nPinned destination: " + (pinned == null ? "Unavailable" : pinned.label());
+        }
+        snapshot = updated;
     }
     private interface Command { void run() throws Exception; default void discard() { } }
     private boolean command(final Command action) {
@@ -155,7 +256,7 @@ final class FtpsCoordinator {
     }
     void uploadNow() {
         command(new Command() { @Override public void run() {
-            pauseRequested.set(false); queue.uploadNow(); publish("Queued work requested. Charging, unmetered Wi-Fi, runtime permission and trusted TLS remain mandatory.",false);
+            pauseRequested.set(false); queue.uploadNow(); catchupDeferred = false; postCatchup(); publish("Queued work requested. Charging, unmetered Wi-Fi, runtime permission and trusted TLS remain mandatory.",false);
         } });
     }
     void pause() {
@@ -244,7 +345,7 @@ final class FtpsCoordinator {
             }
             String attempt = item.attempt == null ? FtpsTransfer.newAttemptName(item.source,item.wavHash,item.revision) : item.attempt;
             queue.begin(item,attempt); // Must commit successfully before creating any connection or issuing DNS.
-            publish(item.attempt == null ? "Sending explicitly queued WAV + technical metadata to " + profile.label()
+            publish(item.attempt == null ? "Sending authorized queued WAV + technical metadata to " + profile.label()
                 : "Read-only reconciliation of the exact prior remote attempt at " + profile.label(),true);
             try (FtpsNetwork connection = new FtpsNetwork(context,selectedNetwork)) {
                 job.connection = connection; job.check();
@@ -289,6 +390,9 @@ final class FtpsCoordinator {
         List<FtpsQueue.Item> pending = queue.items(true); long total = pendingBytes(pending), soonest = Long.MAX_VALUE, now = System.currentTimeMillis();
         for (FtpsQueue.Item item : pending) if (triggered(item,total,now))
             soonest = Math.min(soonest,Math.max(0,item.nextAt - now));
+        // Persist a wake while catch-up remains, covering death between confirmations.
+        if (queue.automaticRevision() != null && catchup != null && !catchup.isEmpty() && !catchupDeferred)
+            soonest = Math.min(soonest,300000);
         return soonest == Long.MAX_VALUE ? -1 : Math.max(1000,soonest);
     }
     private void schedule(final long delay) {
@@ -306,6 +410,7 @@ final class FtpsCoordinator {
             Snapshot old = snapshot;
             snapshot = new Snapshot(old.page,old.profile,old.items,old.destinations,
                 "Android did not schedule the transfer. Queue is retained; open this screen and request Upload queued now again.",old.busy,old.paused);
+            snapshot.automaticRevision = old.automaticRevision; snapshot.automaticNotice = old.automaticNotice;
         }
     }
 }

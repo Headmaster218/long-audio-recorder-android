@@ -18,7 +18,7 @@ import java.util.ArrayList;
 import io.github.headmaster218.recorder.core.CommittedSegments;
 import io.github.headmaster218.recorder.core.FtpsTransfer;
 
-/** Explicit native selection/consent UI. No automatic enrollment of recordings. Password view never saves state. */
+/** Explicit native selection/consent UI. Automatic enrollment requires explicit destination-bound consent. Password view never saves state. */
 final class FtpsControls {
     private static final int LAN_REQUEST = 6201;
     private final Activity activity;
@@ -27,7 +27,7 @@ final class FtpsControls {
     private final CheckBox remember;
     private final TextView savedProfile, status, receipt;
     private final Spinner sources, queued;
-    private final Button save, load, next, add, upload, pause;
+    private final Button save, load, next, add, upload, pause, automatic;
     private CommittedSegments.Page displayed;
     private FtpsCoordinator.Snapshot rendered;
     private String shownRevision;
@@ -37,7 +37,7 @@ final class FtpsControls {
         this.activity = activity; coordinator = FtpsCoordinator.get(activity);
         coordinator.reschedule(); // Re-open repairs retained intent; never enrolls new recordings.
         text(column,"Explicit FTPS transfer",22);
-        text(column,"Automatic enrollment: OFF. Select each completed WAV and confirm its saved destination. Only those selected files can transfer in the background. FTPS sends the WAV plus technical segment metadata (capture/run identity, format, input route, timing/sequence and hashes). All originals remain. Cache full still stops recording and alerts; nothing is evicted.",15);
+        text(column,"Automatic enrollment defaults OFF. Enable explicitly below for existing and future finalized chunks to the shown saved destination, or select individual WAVs. FTPS sends the WAV plus technical segment metadata (capture/run identity, format, input route, timing/sequence and hashes). All originals remain. Cache full still stops recording and alerts; nothing is evicted.",15);
         text(column,"Requires charging + unmetered Wi-Fi. Cellular, VPN and ambiguous routes are blocked, including Upload queued now. TLS 1.2+ and trusted hostname certificates are mandatory on control and data. The server must support explicit FTPS, EPSV, protected data connections, new directories and readback. No plain FTP, SMB or active mode.",14);
         host = field(column,"FTPS hostname or IP (certificate must match)","",253,InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
         port = field(column,"Explicit FTPS port","21",5,InputType.TYPE_CLASS_NUMBER);
@@ -50,6 +50,7 @@ final class FtpsControls {
         text(column,"Default is session-only. After process death, enter the password again for the same saved destination. Saving a profile alone does not queue any recordings. Existing explicitly queued files for that exact profile can resume after credentials are supplied.",14);
         save = button(column,"Save destination and password",new View.OnClickListener() { @Override public void onClick(View v) { save(); } });
         savedProfile = text(column,"No saved FTPS destination",15);
+        automatic = button(column,"Enable automatic enrollment…",new View.OnClickListener() { @Override public void onClick(View v) { confirmAutomatic(); } });
         load = button(column,"Load / refresh completed WAVs for FTPS",new View.OnClickListener() { @Override public void onClick(View v) { localNotice = ""; coordinator.load(null); } });
         sources = new Spinner(activity); column.addView(sources);
         next = button(column,"Next completed-WAV page",new View.OnClickListener() { @Override public void onClick(View v) {
@@ -112,6 +113,17 @@ final class FtpsControls {
             : "Local-network permission was not granted. FTPS remains blocked; recording controls are independent.";
         render();
     }
+    private void confirmAutomatic() {
+        final FtpsCoordinator.Snapshot s = coordinator.snapshot();
+        if (s.automaticRevision != null) { coordinator.automatic(false,null); return; }
+        if (s.profile == null || !ensureLanPermission()) return;
+        final String revision = s.profile.revision;
+        new AlertDialog.Builder(activity).setTitle("Automatically enroll completed recordings?")
+            .setMessage("Destination: " + s.profile.label() + "\n\nExisting and future finalized WAV chunks plus technical metadata (capture/run identity, format, input route, timing/sequence and hashes) may transfer in the background. This destination stays pinned even if you save another profile. Charging, unmetered Wi-Fi, permission and trusted TLS remain required. Transfer threshold: 9,600,000 pending bytes; a smaller tail needs Upload queued now.\n\nAll originals remain. Queue history is capped at 500 rows; reaching it disables enrollment without deleting anything. Catch-up is bounded and waits while recording owns the spool. This does not start the microphone or save credentials. Disable stops new enrollment; Pause stops already queued transfers.")
+            .setNegativeButton("Cancel",null).setPositiveButton("Enable for this destination",new DialogInterface.OnClickListener() {
+                @Override public void onClick(DialogInterface dialog,int which) { localNotice = ""; coordinator.automatic(true,revision); }
+            }).show();
+    }
     private void confirmQueue() {
         if (!ensureLanPermission()) return;
         final CommittedSegments.Page selectedPage = displayed;
@@ -156,12 +168,14 @@ final class FtpsControls {
             if (!labels.isEmpty()) queued.setSelection(restore); receipt();
         }
         boolean available = !s.busy && !coordinator.commandPending();
+        automatic.setEnabled(available && (s.profile != null || s.automaticRevision != null));
+        automatic.setText(s.automaticRevision == null ? "Enable automatic enrollment…" : "Disable new automatic enrollment");
         save.setEnabled(available); load.setEnabled(available); next.setEnabled(available && displayed != null && displayed.hasMore);
         add.setEnabled(available && s.profile != null && displayed != null && !displayed.entries.isEmpty()); sources.setEnabled(available);
-        upload.setEnabled(available && !s.items.isEmpty()); pause.setEnabled(!s.paused || s.busy);
+        upload.setEnabled(available && (!s.items.isEmpty() || s.paused)); pause.setEnabled(!s.paused || s.busy);
         String pageInfo = displayed == null ? "" : "\nCompleted page: " + displayed.entries.size() + "; rejected entries: " + displayed.rejected;
         status.setText((localNotice.isEmpty() ? "" : localNotice + "\n") + s.notice + "\nQueue records: " + s.items.size()
-            + (s.paused ? " · PAUSED" : "") + pageInfo);
+            + (s.paused ? " · PAUSED" : "") + "\nAutomatic enrollment: " + s.automaticNotice + pageInfo);
     }
     private void receipt() {
         if (rendered == null) return; int index = queued.getSelectedItemPosition();

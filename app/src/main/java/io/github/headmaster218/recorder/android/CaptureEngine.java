@@ -107,7 +107,7 @@ final class CaptureEngine implements Runnable {
         try {
             Path root = context.getFilesDir().toPath().resolve("audio-spool");
             evidence.openingSpool();
-            spool = new DirectorySpool(root,new CachePolicy(settings.cacheBytes,RecordingSettings.FREE_RESERVE),new AndroidDirectoryProtocol(),new DirectorySpool.Faults() { @Override public void before(DirectorySpool.Operation op,Path path) { } });
+            synchronized (SpoolAdmission.LOCK) { spool = new DirectorySpool(root,new CachePolicy(settings.cacheBytes,RecordingSettings.FREE_RESERVE),new AndroidDirectoryProtocol(),new DirectorySpool.Faults() { @Override public void before(DirectorySpool.Operation op,Path path) { } }); }
             long sequence = spool.nextSequence(captureId);
             if (stop == Stop.NONE) {
                 phase = Failure.INITIALIZATION;
@@ -123,7 +123,11 @@ final class CaptureEngine implements Runnable {
                         CaptureTimeline.Gap first = current.silenced ? CaptureTimeline.Gap.POLICY_SILENCE
                             : resumedCapture ? CaptureTimeline.Gap.RESTART : CaptureTimeline.Gap.START;
                         evidence.openingWriter();
-                        writer = new PcmSegmentWriter(spool,epoch(current,first),settings.targetFrames,sequence,new PcmSegmentWriter.Listener() { @Override public void published(io.github.headmaster218.recorder.core.SegmentStore.Published published) { } });
+                        writer = new PcmSegmentWriter(spool,epoch(current,first),settings.targetFrames,sequence,new PcmSegmentWriter.Listener() { @Override public void published(io.github.headmaster218.recorder.core.SegmentStore.Published published) {
+                            // Queue plumbing cannot turn a durably finalized recording into a capture failure.
+                            // A missed notification is rediscovered on next process start/explicit enable.
+                            try { FtpsCoordinator.get(context).published(published); } catch (RuntimeException ignored) { }
+                        } });
                     } else if (block.uncertain || !current.route.equals(previous.route)) {
                         if (epochNumber == Long.MAX_VALUE) throw new IOException("Epoch counter exhausted");
                         epochNumber++;
@@ -161,6 +165,8 @@ final class CaptureEngine implements Runnable {
             } else if (record != null) releaseRecord(record);
             if (spool != null) try { spool.close(); evidence.spoolClosed(); }
             catch (IOException | RuntimeException e) { fail(Failure.STORAGE,"Storage close failed; preserved files need inspection: " + e.getMessage()); }
+            // Always deliver recorder completion even if independent transfer plumbing is unavailable.
+            try { FtpsCoordinator.get(context).captureClosed(); } catch (RuntimeException ignored) { }
             PcmReadAccounting.Snapshot finalAccounting = accounting.snapshot();
             if (finalAccounting.hasUnconfirmed()) fail(Failure.PCM_ACCOUNTING,"Run ended with unconfirmed PCM; recovery inspection is required");
             CaptureEvidence.Result outcome = evidence.finish(finalAccounting,!producerStarted || !producer.isAlive());
