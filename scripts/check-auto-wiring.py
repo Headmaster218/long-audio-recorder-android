@@ -6,8 +6,8 @@ c=(r/'CaptureEngine.java').read_text();q=(r/'FtpsCoordinator.java').read_text();
 checks=[
  'try { FtpsCoordinator.get(context).captureClosed(); } catch (RuntimeException ignored)' in c,
  'try { FtpsCoordinator.get(context).published(published); } catch (RuntimeException ignored)' in c,
- 'synchronized (SpoolAdmission.LOCK)' in c and 'synchronized (SpoolAdmission.LOCK)' in q,
- 'spool.confirmReady(id,new io.github.headmaster218.recorder.core.VerifiedExport.Cancellation()' in q and 'SystemClock.elapsedRealtime() >= deadline || pauseRequested.get()' in q,
+ 'SpoolAdmission.beginCapture()' in c and 'SpoolAdmission.beginMaintenance()' in q,
+ 'spool.confirmReady(id,new VerifiedExport.Cancellation()' in q and 'SystemClock.elapsedRealtime()>=deadline || pauseRequested.get()' in q,
  'Arrays.equals(entry.metadata.encode(),published.metadata.encode())' in q,
  'new Semaphore(32)' in q and 'notifications.tryAcquire()' in q and 'notifications.release()' in q,
  '4096,FtpsQueue.MAX_ROWS' in q,
@@ -15,7 +15,7 @@ checks=[
  '(!s.items.isEmpty() || s.paused)' in ui,
  'current.revision.equals(shownRevision)' in q,
  'catchupDeferred = false; postCatchup(); publish(' in q,
- 'catchup != null && !catchup.isEmpty() && !catchupDeferred' in q,
+ 'catchup != null && !catchup.isEmpty())' in q and 'catchupDeferred=false; postCatchup();' in q,
  'queue.automatic(null,reason' in q,
 ]
 assert all(checks),[i for i,x in enumerate(checks) if not x]

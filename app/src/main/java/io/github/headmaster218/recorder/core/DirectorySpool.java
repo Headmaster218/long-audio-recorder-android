@@ -15,6 +15,10 @@ import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
 import io.github.headmaster218.recorder.core.CaptureTimeline.SegmentManifest;
 import io.github.headmaster218.recorder.core.SegmentMetadata.Intent;
 
@@ -77,8 +81,14 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
     private final Faults faults;
     private final FileChannel lockChannel;
     private final FileLock lock;
-    private Stage active;
-    private boolean closed;
+    private volatile Stage active;
+    private volatile boolean closed;
+    private boolean closing;
+    private Maintenance maintenance;
+    private final SpoolUsage usage;
+    private final Map<String,Long> sequences=new HashMap<String,Long>();
+    private final Set<String> confirmed=new HashSet<String>();
+    private final Set<String> eligible=new HashSet<String>();
     public DirectorySpool(Path root, CachePolicy cache, DirectoryProtocol protocol, Faults faults) throws IOException {
         if (root == null || cache == null || protocol == null || faults == null) throw new IllegalArgumentException();
         this.root = root.toAbsolutePath().normalize(); this.cache = cache; this.protocol = protocol; this.faults = faults;
@@ -92,6 +102,7 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
         FileChannel channel = FileChannel.open(this.root.resolve(".writer.lock"), StandardOpenOption.CREATE,
             StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS);
         FileLock acquired = null;
+        SpoolUsage census=null;
         try {
             try { acquired = channel.tryLock(); } catch (OverlappingFileLockException e) { throw new IOException("spool already owned", e); }
             if (acquired == null) throw new IOException("spool already owned");
@@ -99,13 +110,14 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
             // The parent entry makes this root reachable after restart. Do this even if another
             // cooperating creator made the root before this constructor acquired the lock.
             protocol.syncDirectory(parent); // Unsupported/failed durability blocks recording admission.
+            census=inventory();
         } catch (IOException | RuntimeException e) {
             try { if (acquired != null) acquired.release(); }
             catch (IOException closeFailure) { e.addSuppressed(closeFailure); }
             finally { try { channel.close(); } catch (IOException closeFailure) { e.addSuppressed(closeFailure); } }
             throw e;
         }
-        lockChannel = channel; lock = acquired;
+        lockChannel = channel; lock = acquired; usage=census;
     }
     private void live() throws IOException { if (closed || !lock.isValid()) throw new IOException("spool closed or ownership lost"); }
     private void op(Operation operation, Path path) throws IOException { live(); faults.before(operation, path); }
@@ -113,27 +125,44 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
     private static boolean regular(Path p) throws IOException {
         return Files.readAttributes(p, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS).isRegularFile();
     }
-    private long occupied() throws IOException {
-        long total = 0;
-        try (DirectoryStream<Path> dirs = Files.newDirectoryStream(root)) {
-            for (Path p : dirs) {
-                BasicFileAttributes a = Files.readAttributes(p, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
-                if (a.isRegularFile()) total = Checks.add(total, a.size());
-                else if (a.isDirectory()) {
-                    try (DirectoryStream<Path> files = Files.newDirectoryStream(p)) {
-                        for (Path f : files) {
-                            if (!regular(f)) throw new IOException("unexpected nested/symlink spool entry");
-                            total = Checks.add(total, Files.size(f));
+    private SpoolUsage inventory() throws IOException {
+        SpoolUsage result=new SpoolUsage();
+        try (DirectoryStream<Path> dirs=Files.newDirectoryStream(root)) {
+            for(Path p:dirs) {
+                BasicFileAttributes a=Files.readAttributes(p,BasicFileAttributes.class,LinkOption.NOFOLLOW_LINKS);
+                long bytes=0;
+                if(a.isRegularFile()) bytes=a.size();
+                else if(a.isDirectory()) {
+                    int count=0;
+                    try(DirectoryStream<Path> files=Files.newDirectoryStream(p)) {
+                        for(Path f:files) {
+                            if(++count>4096 || !regular(f)) throw new IOException("unexpected nested/symlink spool entry");
+                            bytes=Checks.add(bytes,Files.size(f));
                         }
                     }
                 } else throw new IOException("unexpected spool entry");
+                String name=p.getFileName().toString(); result.inventory(name,bytes);
+                if(name.endsWith(".ready") || name.endsWith(".quarantine") || name.endsWith(".retired")) eligible.add(SpoolUsage.key(name));
+                if(name.matches("segment-[0-9a-f]{64}-[0-9]+\\.(part|ready|quarantine|retired)")) {
+                    int dash=name.lastIndexOf('-'), dot=name.lastIndexOf('.');
+                    try {
+                        long used=Long.parseLong(name.substring(dash+1,dot));
+                        if(used==Long.MAX_VALUE) throw new IOException("sequence exhausted");
+                        String prefix=name.substring(0,dash+1); Long old=sequences.get(prefix);
+                        sequences.put(prefix,Math.max(old==null ? 0 : old,used+1));
+                    } catch(NumberFormatException e) { throw new IOException("invalid sequence reservation",e); }
+                } else if(name.startsWith("segment-")) throw new IOException("malformed sequence reservation");
             }
         }
-        return total;
+        return result;
     }
+    private void charge(Path path,long bytes) throws IOException {
+        Path relative=root.relativize(path); usage.charge(relative.getName(0).toString(),bytes);
+    }
+    long chargedBytes() { return usage.total(); }
     private void budget(long growth, boolean reserveFinalization) throws IOException {
         live(); long required = Checks.add(growth, reserveFinalization ? FINALIZATION_RESERVE : 0);
-        if (cache.beforeWrite(occupied(), Files.getFileStore(root).getUsableSpace(), required) != CachePolicy.Decision.CONTINUE)
+        if (cache.beforeWrite(usage.total(), Files.getFileStore(root).getUsableSpace(), required) != CachePolicy.Decision.CONTINUE)
             throw new StorageException(Failure.CACHE_FULL, "STOP_AND_ALERT: preserve all staged and ready data", null);
     }
     private static String prefix(String captureId) {
@@ -143,20 +172,7 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
     private static String id(Intent intent) { return prefix(intent.epoch.captureId) + intent.sequence; }
     /** Includes empty/failed staging reservations. This suggests an ordinal; open() reserves it under the lock. */
     public long nextSequence(String captureId) throws IOException {
-        live(); String prefix = prefix(captureId); long next = 0;
-        try (DirectoryStream<Path> entries = Files.newDirectoryStream(root)) {
-            for (Path p : entries) {
-                String name = p.getFileName().toString(); if (!name.startsWith(prefix)) continue;
-                String suffix = name.substring(prefix.length());
-                if (!suffix.matches("[0-9]+\\.(part|ready|quarantine|retired)")) throw new IOException("malformed sequence reservation");
-                try {
-                    long used = Long.parseLong(suffix.substring(0, suffix.indexOf('.')));
-                    if (used == Long.MAX_VALUE) throw new IOException("sequence exhausted");
-                    next = Math.max(next, used + 1);
-                } catch (NumberFormatException e) { throw new IOException("invalid sequence reservation", e); }
-            }
-        }
-        return next;
+        live(); Long next=sequences.get(prefix(captureId)); return next==null ? 0 : next;
     }
     private Path object(String name) throws IOException {
         if (name == null || !name.matches("segment-[0-9a-f]{64}-[0-9]+\\.(part|ready|quarantine|retired)"))
@@ -167,16 +183,17 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
     }
     @Override public Staging open(Intent intent) throws IOException {
         live(); if (active != null && !active.done) throw new IOException("only one open segment allowed");
-        if (intent.sequence < nextSequence(intent.epoch.captureId)) throw new IOException("stale/reused sequence");
+        if (intent.sequence==Long.MAX_VALUE || intent.sequence < nextSequence(intent.epoch.captureId)) throw new IOException("stale/reused sequence");
         String identity = id(intent); Path stage = root.resolve(identity + ".part");
         if (Files.exists(root.resolve(identity + ".ready"), LinkOption.NOFOLLOW_LINKS)) throw new IOException("sequence already published");
         byte[] journal = SegmentMetadata.encodeIntent(intent);
         budget(journal.length + WavHeader.BYTES, true);
+        usage.charge(identity,0); sequences.put(prefix(intent.epoch.captureId),intent.sequence+1);
         op(Operation.CREATE_STAGE, stage); Files.createDirectory(stage); // CREATE_NEW reserves identity; never overwrites.
         FileChannel wav = null;
         try {
             writeNew(stage.resolve(INTENT), journal, Operation.WRITE_INTENT, Operation.SYNC_INTENT, true);
-            op(Operation.WRITE_HEADER, stage.resolve(WAV)); budget(WavHeader.BYTES, true);
+            op(Operation.WRITE_HEADER, stage.resolve(WAV)); budget(WavHeader.BYTES, true); charge(stage.resolve(WAV),WavHeader.BYTES);
             wav = FileChannel.open(stage.resolve(WAV), StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE,
                 LinkOption.NOFOLLOW_LINKS);
             writeFully(wav, ByteBuffer.wrap(WavHeader.encode(intent.epoch.format, 0))); wav.force(true);
@@ -188,7 +205,7 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
         }
     }
     private void writeNew(Path path, byte[] bytes, Operation write, Operation sync, boolean reserve) throws IOException {
-        budget(bytes.length, reserve); op(write, path);
+        budget(bytes.length, reserve); charge(path,bytes.length); op(write, path);
         try (FileChannel c = FileChannel.open(path, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE,
                 LinkOption.NOFOLLOW_LINKS)) {
             writeFully(c, ByteBuffer.wrap(bytes)); op(sync, path); c.force(true);
@@ -290,6 +307,7 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
         syncDirectory(Operation.SYNC_STAGE, dir); syncDirectory(Operation.SYNC_ROOT, root);
         SegmentMetadata finalCheck = validate(dir,cancellation);
         if (!Arrays.equals(m.encode(), finalCheck.encode())) throw new IOException("metadata changed during confirmation");
+        synchronized(this) { confirmed.add(localObjectId); }
         return new Published(localObjectId, m);
     }
     /** Read-only recovery report: partial/corrupt bytes are preserved, never silently truncated or promoted. */
@@ -338,7 +356,7 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
             live(); if (done) throw new IOException("stage closed");
             if (bytes == null || offset < 0 || length <= 0 || offset > bytes.length - length
                 || length > intent.epoch.format.bytesForFrames(intent.targetFrames) - pcmBytes) throw new IllegalArgumentException();
-            budget(length, true); op(Operation.APPEND_PCM, directory.resolve(WAV));
+            budget(length, true); charge(directory.resolve(WAV),length); op(Operation.APPEND_PCM, directory.resolve(WAV));
             writeFully(wav, ByteBuffer.wrap(bytes, offset, length)); pcmBytes += length;
             op(Operation.SYNC_PCM, directory.resolve(WAV)); wav.force(true);
         }
@@ -356,6 +374,7 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
             syncDirectory(Operation.SYNC_STAGE, directory);
             Path target = root.resolve(id(intent) + ".ready"); op(Operation.PUBLISH, target); protocol.atomicPublish(directory, target);
             syncDirectory(Operation.SYNC_ROOT, root); validate(target);
+            synchronized(DirectorySpool.this) { confirmed.add(target.getFileName().toString()); eligible.add(SpoolUsage.key(target.getFileName().toString())); }
             active = null; return new Published(target.getFileName().toString(), metadata);
         }
         @Override public void preserve() throws IOException {
@@ -364,13 +383,74 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
             finally { done = true; wav.close(); }
         }
     }
-    /** Production cleanup requires an exclusively owned idle spool; never invoke during capture. */
-    public void quarantineVerified(VerifiedLocalCleanup.Prepared binding) throws IOException { live(); VerifiedLocalCleanup.quarantine(root,protocol,binding); }
-    public void restoreQuarantine(VerifiedLocalCleanup.Prepared binding) throws IOException { live(); VerifiedLocalCleanup.restore(root,protocol,binding); }
-    public void purgeQuarantine(VerifiedLocalCleanup.Prepared binding) throws IOException { live(); VerifiedLocalCleanup.purge(root,protocol,binding); }
+    public static final class MaintenanceBusy extends IOException {
+        private static final long serialVersionUID=1L;
+        MaintenanceBusy() { super("spool maintenance closing or busy"); }
+    }
+    /** One exact-object maintenance lease; never grants access to a mutable staging object. */
+    public synchronized Maintenance maintenance(String source) throws IOException {
+        if(closing || closed || maintenance!=null) throw new MaintenanceBusy();
+        live();
+        if(source==null || !source.matches("segment-[0-9a-f]{64}-[0-9]+\\.ready")
+                || !usage.contains(source) || !eligible.contains(SpoolUsage.key(source))) throw new IOException("maintenance unavailable");
+        // A newly opened stage is in usage, but never eligible until durable publication.
+        String key=SpoolUsage.key(source);
+        if(active!=null && key.equals(SpoolUsage.key(active.directory.getFileName().toString())))
+            throw new IOException("active stage is ineligible");
+        maintenance=new Maintenance(source); return maintenance;
+    }
+    public final class Maintenance implements AutoCloseable {
+        private final String source;
+        private boolean released;
+        private Maintenance(String source) { this.source=source; }
+        private void check(VerifiedLocalCleanup.Prepared binding) throws IOException {
+            synchronized(DirectorySpool.this) {
+                live(); if(released || maintenance!=this || !source.equals(binding.source)) throw new IOException("stale maintenance lease");
+            }
+        }
+        /** Existing ready objects must be canonically reconfirmed before destructive admission. */
+        public void confirm(VerifiedExport.Cancellation cancellation) throws IOException {
+            synchronized(DirectorySpool.this) {
+                live(); if(released || maintenance!=this) throw new IOException("stale maintenance lease");
+                if(confirmed.contains(source)) return;
+            }
+            confirmReady(source,cancellation);
+        }
+        public void quarantine(VerifiedLocalCleanup.Prepared binding) throws IOException {
+            check(binding); synchronized(DirectorySpool.this) { if(!confirmed.contains(source)) throw new IOException("source not durably confirmed"); }
+            VerifiedLocalCleanup.quarantine(root,protocol,binding);
+        }
+        public void restore(VerifiedLocalCleanup.Prepared binding) throws IOException { check(binding); VerifiedLocalCleanup.restore(root,protocol,binding); }
+        public void purge(VerifiedLocalCleanup.Prepared binding) throws IOException {
+            check(binding); VerifiedLocalCleanup.purge(root,protocol,binding); usage.purged(source);
+        }
+        @Override public void close() throws IOException {
+            synchronized(DirectorySpool.this) {
+                if(released || maintenance!=this) throw new IOException("maintenance lease already released");
+                released=true; maintenance=null; DirectorySpool.this.notifyAll();
+            }
+        }
+    }
+    // Compatibility helpers for exclusively owned idle callers and host protocol tests.
+    public void quarantineVerified(VerifiedLocalCleanup.Prepared binding) throws IOException {
+        try(Maintenance lease=maintenance(binding.source)) { lease.confirm(NEVER_CANCEL); lease.quarantine(binding); }
+    }
+    public void restoreQuarantine(VerifiedLocalCleanup.Prepared binding) throws IOException {
+        try(Maintenance lease=maintenance(binding.source)) { lease.restore(binding); }
+    }
+    public void purgeQuarantine(VerifiedLocalCleanup.Prepared binding) throws IOException {
+        try(Maintenance lease=maintenance(binding.source)) { lease.purge(binding); }
+    }
     @Override public void close() throws IOException {
-        if (closed) return;
-        try { if (active != null) active.preserve(); }
-        finally { closed = true; try { lock.release(); } finally { lockChannel.close(); } }
+        synchronized(this) { if(closed) return; closing=true; }
+        // Called after microphone release. No accounting/admission monitor is held over I/O.
+        IOException failure=null;
+        try { if(active!=null) active.preserve(); } catch(IOException e) { failure=e; } catch(RuntimeException e) { failure=new IOException("stage preserve failed",e); }
+        boolean interrupted=false;
+        synchronized(this) {
+            while(maintenance!=null) { try { wait(); } catch(InterruptedException e) { interrupted=true; } }
+        }
+        try { lock.release(); } finally { closed=true; lockChannel.close(); if(interrupted) Thread.currentThread().interrupt(); }
+        if(failure!=null) throw failure;
     }
 }

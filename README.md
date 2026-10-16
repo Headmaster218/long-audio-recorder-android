@@ -2,9 +2,9 @@
 
 # Android recorder
 
-Version: **0.1.0-dev10** (explicit opt-in verified-transfer cleanup source candidate; unsigned build only, not device-qualified).
+Version: **0.1.0-dev11** (concurrent finalized-object cleanup source candidate; unsigned build only, not device-qualified).
 
-Dev10 adds separate default-off, destination-pinned readback-at-time local cleanup. It runs only while recording is idle and leaves permanent sequence reservations and receipts. Remote future loss remains a disclosed risk. See [cleanup consent, crash behavior and remaining limits](docs/verified-local-cleanup.md). This does not yet provide continuous all-day rolling reclamation.
+Dev11 allows separately opted-in cleanup of finalized chunks while recording continues, using one shared physical owner and conservative cache accounting. See [ownership, tests and remaining limits](docs/continuous-cleanup.md). Remote future loss remains a disclosed risk. The 500-row history cap remains; this is not accepted uninterrupted all-day recording. Dev10 introduced the [cleanup consent and crash protocol](docs/verified-local-cleanup.md).
 
 Dev9 adds destination-pinned, explicit opt-in enrollment of existing and future finalized chunks. See [automatic queue scope, tests and limits](docs/automatic-enrollment.md). Originals remain unless the separate dev10 cleanup policy is enabled; no recording restart is added.
 
@@ -89,7 +89,7 @@ fresh official-SDK unsigned build. These checks do not run Android lifecycle,
 permissions, AudioRecord, notifications or filesystem behavior.
 
 Missing product functions include SMB,
-plain FTP, cellular transfer/quotas, strict deletion eligibility, continuous-recording reclamation,
+plain FTP, cellular transfer/quotas, strict immutable deletion eligibility, queue-history retirement,
 durable cross-process recording resume, headset input selection and
 complete runtime event history. Windows builds, Xiaomi/OEM behavior, UI usability,
 screen-off recording, real process/power loss, battery/thermal behavior and

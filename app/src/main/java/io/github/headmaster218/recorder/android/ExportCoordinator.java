@@ -42,7 +42,9 @@ final class ExportCoordinator {
     }
     boolean previousInterrupted() { return interrupted; }
     void load(final String after) {
-        final String token = session.list(); if (token == null) return;
+        final String token;
+        synchronized(SpoolAdmission.LOCK) { if(SpoolAdmission.maintenanceActive()) return; token=session.list(); }
+        if (token == null) return;
         worker.execute(new Runnable() { @Override public void run() {
             try {
                 // Canonicalize the platform-provided private anchor only; catalog rejects links below it.
@@ -53,7 +55,7 @@ final class ExportCoordinator {
     }
     String choose(CommittedSegments.Page displayedPage, int index) {
         String token;
-        synchronized(SpoolAdmission.LOCK) { token=session.choose(displayedPage,index); }
+        synchronized(SpoolAdmission.LOCK) { if(SpoolAdmission.maintenanceActive()) return null; token=session.choose(displayedPage,index); }
         if (token == null) return null;
         // Marker is committed before handing control to another app. No audio or target URI is stored here.
         if (!journal.edit().putBoolean("in-flight", true).commit()) {

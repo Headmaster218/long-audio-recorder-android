@@ -137,16 +137,16 @@ final class FtpsCoordinator {
         String revision = queue.automaticRevision(), id = catchup.peek();
         if (queue.contains(id,revision)) { catchup.remove(); return; }
         if (queue.full()) { automaticBlocked("500-row queue history bound reached"); return; }
-        synchronized (SpoolAdmission.LOCK) {
-            DirectorySpool owned;
-            try { owned = new DirectorySpool(spoolRoot(),new CachePolicy(RecordingSettings.defaults().cacheBytes,RecordingSettings.FREE_RESERVE),new AndroidDirectoryProtocol(),new DirectorySpool.Faults() { @Override public void before(DirectorySpool.Operation operation,Path path) { } }); }
-            catch (IOException e) {
-                catchupDeferred = true;
-                queue.automatic(revision,"ON: catch-up deferred until recording closes or app restarts; spool unavailable/owned. New finalized chunks still enroll."); return;
+        SpoolAdmission.Reservation reservation;
+        try { reservation=SpoolAdmission.beginMaintenance(); }
+        catch(IOException e) { catchupDeferred=true; return; }
+        try {
+            if(reservation.owner!=null) { catchupDeferred=true; return; }
+            final long deadline=SystemClock.elapsedRealtime()+10000;
+            try(DirectorySpool spool=new DirectorySpool(spoolRoot(),new CachePolicy(RecordingSettings.defaults().cacheBytes,RecordingSettings.FREE_RESERVE),new AndroidDirectoryProtocol(),new DirectorySpool.Faults() { @Override public void before(DirectorySpool.Operation op,Path path) { } })) {
+                spool.confirmReady(id,new VerifiedExport.Cancellation() { @Override public boolean cancelled() { return SystemClock.elapsedRealtime()>=deadline || pauseRequested.get(); } });
             }
-            final long deadline = SystemClock.elapsedRealtime() + 10000;
-            try (DirectorySpool spool = owned) { spool.confirmReady(id,new io.github.headmaster218.recorder.core.VerifiedExport.Cancellation() { @Override public boolean cancelled() { return SystemClock.elapsedRealtime() >= deadline || pauseRequested.get(); } }); }
-        }
+        } finally { reservation.close(); }
         queue.enqueue(catalog.load(id),revision,true); catchup.remove();
     }
     void captureClosed() {
@@ -281,20 +281,32 @@ final class FtpsCoordinator {
     }
     private static final class CleanupDeferred extends IOException {
         private static final long serialVersionUID=1L;
-        CleanupDeferred() { super("Cleanup waits until recording stops"); }
+        CleanupDeferred() { super("Cleanup waits for exclusive finalized-object admission"); }
     }
-    private interface LocalAction { void run(DirectorySpool spool) throws IOException; }
-    private void localStep(final LocalAction action) throws IOException {
-        synchronized(SpoolAdmission.LOCK) {
-            if(RecorderState.active || ExportCoordinator.cleanupBlocked()) throw new CleanupDeferred();
-            try(DirectorySpool spool=new DirectorySpool(spoolRoot(),new CachePolicy(RecordingSettings.defaults().cacheBytes,RecordingSettings.FREE_RESERVE),new AndroidDirectoryProtocol(),new DirectorySpool.Faults() { @Override public void before(DirectorySpool.Operation op,Path path) { } })) { action.run(spool); }
+    private interface LocalAction { void run(DirectorySpool.Maintenance lease) throws IOException; }
+    private void localStep(String source,boolean confirm,final LocalAction action) throws IOException {
+        SpoolAdmission.Reservation reservation;
+        try { reservation=SpoolAdmission.beginMaintenance(); } catch(IOException e) { throw new CleanupDeferred(); }
+        DirectorySpool spool=reservation.owner;
+        boolean idle=spool==null;
+        try {
+            if(idle) spool=new DirectorySpool(spoolRoot(),new CachePolicy(RecordingSettings.defaults().cacheBytes,RecordingSettings.FREE_RESERVE),new AndroidDirectoryProtocol(),new DirectorySpool.Faults() { @Override public void before(DirectorySpool.Operation op,Path path) { } });
+            DirectorySpool.Maintenance acquired;
+            try { acquired=spool.maintenance(source); } catch(DirectorySpool.MaintenanceBusy e) { throw new CleanupDeferred(); }
+            try(DirectorySpool.Maintenance lease=acquired) {
+                final long confirmationDeadline=SystemClock.elapsedRealtime()+10000;
+                if(confirm) lease.confirm(new VerifiedExport.Cancellation() { @Override public boolean cancelled() { return pauseRequested.get() || cleanupRevoked.get() || SystemClock.elapsedRealtime()>=confirmationDeadline; } });
+                action.run(lease);
+            }
+        } finally {
+            try { if(idle && spool!=null) spool.close(); } finally { reservation.close(); }
         }
     }
     private static boolean cleanupPending(FtpsQueue.Item item) {
         return item.cleanupState.equals("RESTORE_ONLY") || item.cleanupState.equals("INTENT") || item.cleanupState.equals("QUARANTINED") || item.cleanupState.equals("PURGING");
     }
     private void replayCleanup() {
-        if(queue.paused() || pauseRequested.get() || RecorderState.active || ExportCoordinator.cleanupBlocked()) return;
+        if(queue.paused() || pauseRequested.get() || ExportCoordinator.cleanupBlocked()) return;
         int handled=0;
         for(final FtpsQueue.Item item:queue.items(false)) {
             if(!cleanupPending(item) || handled++>=8) continue;
@@ -303,9 +315,9 @@ final class FtpsCoordinator {
                 final VerifiedLocalCleanup.Prepared binding=VerifiedLocalCleanup.decode(item.cleanupBinding,new AndroidCleanupIdentity());
                 if(!item.source.equals(binding.source)) throw new IOException("Cleanup source mismatch");
                 final boolean purge=item.cleanupState.equals("PURGING");
-                localStep(new LocalAction() { @Override public void run(DirectorySpool spool) throws IOException {
+                localStep(item.source,false,new LocalAction() { @Override public void run(DirectorySpool.Maintenance lease) throws IOException {
                     if(pauseRequested.get()) throw new IOException("Cleanup paused");
-                    if(purge) spool.purgeQuarantine(binding); else spool.restoreQuarantine(binding);
+                    if(purge) lease.purge(binding); else lease.restore(binding);
                 } });
                 queue.cleanup(item,purge ? "REMOVED" : (!item.cleanupState.equals("RESTORE_ONLY") && !cleanupRevoked.get() && item.revision.equals(queue.cleanupRevision()) ? "DEFERRED" : "RESTORED"),item.cleanupBinding);
             } catch(IOException | RuntimeException e) {
@@ -317,33 +329,39 @@ final class FtpsCoordinator {
     private void cleanupFresh(final FtpsQueue.Item item, final CommittedSegments.Entry entry, final Job job) {
         if(!item.revision.equals(queue.cleanupRevision()) || pauseRequested.get() || cleanupRevoked.get()) return;
         if(queue.otherNeedsSource(item)) { try { queue.cleanup(item,"WAIT_SOURCE",null); } catch(IOException | RuntimeException e) { fatal(); } return; }
-        if(RecorderState.active || ExportCoordinator.cleanupBlocked()) {
+        if(ExportCoordinator.cleanupBlocked()) {
             try { queue.cleanup(item,"DEFERRED",null); } catch(IOException | RuntimeException e) { fatal(); }
             return;
         }
-        byte[] encoded=null; String stage="NONE"; final boolean[] purgeEntered={false};
+        byte[] encoded=null; String stage="NONE"; final boolean[] purgeEntered={false},quarantineEntered={false};
         try {
             final long freshness=SystemClock.elapsedRealtime()+30000;
             final VerifiedLocalCleanup.Prepared binding=VerifiedLocalCleanup.prepare(catalog,entry,new VerifiedExport.Cancellation() { @Override public boolean cancelled() { return job.cancelled.get() || pauseRequested.get() || SystemClock.elapsedRealtime()>=Math.min(freshness,job.deadline); } },new AndroidCleanupIdentity());
             encoded=binding.encode(); job.check();
             if(cleanupRevoked.get()) throw new IOException("Cleanup revoked");
             queue.cleanup(item,"INTENT",encoded); stage="INTENT";
-            localStep(new LocalAction() { @Override public void run(DirectorySpool spool) throws IOException {
+            localStep(item.source,true,new LocalAction() { @Override public void run(DirectorySpool.Maintenance lease) throws IOException {
                 job.check(); if(cleanupRevoked.get() || pauseRequested.get() || SystemClock.elapsedRealtime()>=freshness) throw new IOException("Fresh cleanup consent window expired");
-                spool.quarantineVerified(binding);
+                quarantineEntered[0]=true; lease.quarantine(binding);
             } });
             queue.cleanup(item,"QUARANTINED",encoded); stage="QUARANTINED";
             job.check(); if(cleanupRevoked.get() || pauseRequested.get() || SystemClock.elapsedRealtime()>=freshness || !item.revision.equals(queue.cleanupRevision())) throw new IOException("Cleanup stopped before purge authorization");
             queue.cleanup(item,"PURGING",encoded); stage="PURGING";
-            localStep(new LocalAction() { @Override public void run(DirectorySpool spool) throws IOException {
+            localStep(item.source,false,new LocalAction() { @Override public void run(DirectorySpool.Maintenance lease) throws IOException {
                 if(pauseRequested.get() || cleanupRevoked.get()) throw new IOException("Cleanup paused or revoked before purge");
                 purgeEntered[0]=true;
-                spool.purgeQuarantine(binding);
+                lease.purge(binding);
             } });
             queue.cleanup(item,"REMOVED",encoded);
         } catch(IOException | RuntimeException e) {
             // Durable intent records uncertainty. Pre-purge restart restores; partial purge replay
             // only removes the exact bound remaining objects. Never invent a new proof or attempt.
+            // Confirmation/admission failed before any quarantine call: source is still intact.
+            // Do not repeatedly download a remote copy for a permanently slow/invalid local source.
+            if(stage.equals("INTENT") && !quarantineEntered[0] && !(e instanceof CleanupDeferred)) {
+                try { queue.cleanup(item,"BLOCKED",encoded); queue.state(item,"VERIFIED_AT_TIME","Local confirmation failed before quarantine; source retained for inspection",0); }
+                catch(IOException | RuntimeException failed) { fatal(); }
+            }
             if(stage.equals("PURGING") && !purgeEntered[0]) {
                 try { queue.cleanup(item,"QUARANTINED",encoded); } catch(IOException | RuntimeException failed) { fatal(); }
             }
@@ -394,7 +412,7 @@ final class FtpsCoordinator {
         return job;
     }
     private boolean recheckDeferred(final Job job) {
-        if(RecorderState.active || ExportCoordinator.cleanupBlocked() || cleanupRevoked.get()) return false;
+        if(ExportCoordinator.cleanupBlocked() || cleanupRevoked.get()) return false;
         for(final FtpsQueue.Item item:queue.items(false)) {
             if(!item.state.equals("VERIFIED_AT_TIME") || !(item.cleanupState.equals("DEFERRED") || item.cleanupState.equals("RECHECKING") || item.cleanupState.equals("WAIT_SOURCE")) || !item.revision.equals(queue.cleanupRevision())) continue;
             if(item.nextAt>System.currentTimeMillis() || queue.otherNeedsSource(item)) continue;
@@ -434,6 +452,8 @@ final class FtpsCoordinator {
     }
     private void runOne(final Job job) {
         if (queue.paused()) return;
+        // A persisted, bounded wake resumes deferred discovery without a fresh history scan.
+        catchupDeferred=false; postCatchup();
         replayCleanup(); if (unavailable) return;
         if(recheckDeferred(job)) return;
         List<FtpsQueue.Item> items = queue.items(true); long total = pendingBytes(items), now = System.currentTimeMillis();
@@ -522,9 +542,9 @@ final class FtpsCoordinator {
             soonest = Math.min(soonest,Math.max(0,item.nextAt - now));
         for(FtpsQueue.Item item:queue.items(false)) if(cleanupPending(item)
             || (!cleanupRevoked.get() && item.revision.equals(queue.cleanupRevision()) && (item.cleanupState.equals("DEFERRED") || item.cleanupState.equals("RECHECKING") || (item.cleanupState.equals("WAIT_SOURCE") && !queue.otherNeedsSource(item)))))
-            soonest=Math.min(soonest,Math.max((RecorderState.active || ExportCoordinator.cleanupBlocked()) ? 300000 : 5000,item.nextAt-now));
+            soonest=Math.min(soonest,Math.max(ExportCoordinator.cleanupBlocked() ? 300000 : 5000,item.nextAt-now));
         // Persist a wake while catch-up remains, covering death between confirmations.
-        if (queue.automaticRevision() != null && catchup != null && !catchup.isEmpty() && !catchupDeferred)
+        if (queue.automaticRevision() != null && catchup != null && !catchup.isEmpty())
             soonest = Math.min(soonest,300000);
         return soonest == Long.MAX_VALUE ? -1 : Math.max(1000,soonest);
     }

@@ -107,7 +107,9 @@ final class CaptureEngine implements Runnable {
         try {
             Path root = context.getFilesDir().toPath().resolve("audio-spool");
             evidence.openingSpool();
-            synchronized (SpoolAdmission.LOCK) { spool = new DirectorySpool(root,new CachePolicy(settings.cacheBytes,RecordingSettings.FREE_RESERVE),new AndroidDirectoryProtocol(),new DirectorySpool.Faults() { @Override public void before(DirectorySpool.Operation op,Path path) { } }); }
+            Object admission=SpoolAdmission.beginCapture();
+            try { spool = new DirectorySpool(root,new CachePolicy(settings.cacheBytes,RecordingSettings.FREE_RESERVE),new AndroidDirectoryProtocol(),new DirectorySpool.Faults() { @Override public void before(DirectorySpool.Operation op,Path path) { } }); SpoolAdmission.opened(admission,spool); }
+            catch(IOException | RuntimeException e) { SpoolAdmission.abandonOpening(admission); throw e; }
             long sequence = spool.nextSequence(captureId);
             if (stop == Stop.NONE) {
                 phase = Failure.INITIALIZATION;
@@ -163,7 +165,7 @@ final class CaptureEngine implements Runnable {
                     if (producer.isAlive()) RecorderState.status = "Stopping: waiting for Android to release the microphone";
                 }
             } else if (record != null) releaseRecord(record);
-            if (spool != null) try { spool.close(); evidence.spoolClosed(); }
+            if (spool != null) try { RecorderState.status="Stopping: waiting for storage and verified cleanup to finish"; spool.close(); SpoolAdmission.captureClosed(spool); evidence.spoolClosed(); }
             catch (IOException | RuntimeException e) { fail(Failure.STORAGE,"Storage close failed; preserved files need inspection: " + e.getMessage()); }
             // Always deliver recorder completion even if independent transfer plumbing is unavailable.
             try { FtpsCoordinator.get(context).captureClosed(); } catch (RuntimeException ignored) { }

@@ -58,7 +58,7 @@ public final class VerifiedLocalCleanupTest {
         Fixture unexpected=new Fixture();Files.write(unexpected.ready.resolve("extra"),new byte[]{1});
         try(DirectorySpool spool=unexpected.open()) { fails(()->spool.quarantineVerified(unexpected.prepared));yes(Files.exists(unexpected.ready.resolve("audio.wav"))); }
         Fixture conflict=new Fixture();Files.createDirectory(conflict.quarantine);
-        try(DirectorySpool spool=conflict.open()) { fails(()->spool.quarantineVerified(conflict.prepared));yes(Files.exists(conflict.ready)); }
+        fails(()->{try(DirectorySpool spool=conflict.open()) { spool.quarantineVerified(conflict.prepared); }});yes(Files.exists(conflict.ready));
         Fixture interrupted=new Fixture();final boolean[] fail={false};
         DirectorySpool.DirectoryProtocol fault=new DirectorySpool.DirectoryProtocol() {
             public void syncDirectory(Path p)throws IOException { NORMAL.syncDirectory(p);if(fail[0]&&p.equals(interrupted.quarantine)){fail[0]=false;throw new IOException("synthetic crash after unlink");} }

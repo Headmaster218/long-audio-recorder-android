@@ -1,3 +1,5 @@
+> Historical dev10 scope. Dev11 changes idle-only ownership to concurrent finalized-object maintenance; see [current ownership and cache accounting](continuous-cleanup.md). Consent and cleanup proof remain unchanged.
+
 # Explicit opt-in local cleanup after readback (dev10)
 
 This is a separate, weaker **readback-at-time** policy. It does not use or change
