@@ -15,10 +15,10 @@ for version in (1,2):
  with tempfile.TemporaryDirectory() as tmp:
   path=Path(tmp)/'synthetic.db';db=sqlite3.connect(path,isolation_level=None);db.execute('PRAGMA foreign_keys=ON')
   db.execute(sql('CREATE TABLE profiles'))
-  settings=sql('CREATE TABLE settings').replace(', cleanup_revision TEXT REFERENCES profiles(revision)','')
+  settings=sql('CREATE TABLE settings').replace(', auto_capacity_at INTEGER NOT NULL DEFAULT 0','').replace(', cleanup_revision TEXT REFERENCES profiles(revision)','')
   if version==1:settings=settings.replace(", auto_revision TEXT REFERENCES profiles(revision), auto_notice TEXT NOT NULL DEFAULT 'OFF'",'')
   db.execute(settings);db.execute(sql('INSERT INTO settings'))
-  db.execute(sql('CREATE TABLE queue').replace(", cleanup_state TEXT NOT NULL DEFAULT 'NONE', cleanup_binding BLOB",''))
+  db.execute(sql('CREATE TABLE queue').replace(", retirement_generation INTEGER","").replace(", cleanup_state TEXT NOT NULL DEFAULT 'NONE', cleanup_binding BLOB",''))
   db.execute("INSERT INTO profiles VALUES('a','synthetic.invalid',21,'synthetic','/synthetic',X'0102')")
   db.execute("UPDATE settings SET current_revision='a',paused=1")
   if version==2:db.execute("UPDATE settings SET auto_revision='a',auto_notice='ON'")

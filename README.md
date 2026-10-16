@@ -2,9 +2,11 @@
 
 # Android recorder
 
-Version: **0.1.0-dev11** (concurrent finalized-object cleanup source candidate; unsigned build only, not device-qualified).
+Version: **0.1.0-dev12** (bounded history-retirement source candidate; unsigned build only, not device-qualified).
 
-Dev11 allows separately opted-in cleanup of finalized chunks while recording continues, using one shared physical owner and conservative cache accounting. See [ownership, tests and remaining limits](docs/continuous-cleanup.md). Remote future loss remains a disclosed risk. The 500-row history cap remains; this is not accepted uninterrupted all-day recording. Dev10 introduced the [cleanup consent and crash protocol](docs/verified-local-cleanup.md).
+Dev12 adds exact, bounded compaction of eligible verified-transfer history and empty ordinal markers. See [crash ordering, bounds and test limits](docs/history-retirement.md). This removes the ordinary contiguous-history lifetime cap, while finite fragmentation and pending-work caps remain.
+
+Dev11 allows separately opted-in cleanup of finalized chunks while recording continues, using one shared physical owner and conservative cache accounting. See [ownership, tests and remaining limits](docs/continuous-cleanup.md). Remote future loss remains a disclosed risk. Its original 500-row history cap is addressed by the bounded dev12 compaction; this is not accepted uninterrupted all-day recording. Dev10 introduced the [cleanup consent and crash protocol](docs/verified-local-cleanup.md).
 
 Dev9 adds destination-pinned, explicit opt-in enrollment of existing and future finalized chunks. See [automatic queue scope, tests and limits](docs/automatic-enrollment.md). Originals remain unless the separate dev10 cleanup policy is enabled; no recording restart is added.
 

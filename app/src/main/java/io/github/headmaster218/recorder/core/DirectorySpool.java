@@ -27,6 +27,7 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
     private static final VerifiedExport.Cancellation NEVER_CANCEL = new VerifiedExport.Cancellation() { @Override public boolean cancelled() { return false; } };
     public enum Operation { CREATE_STAGE, WRITE_INTENT, SYNC_INTENT, WRITE_HEADER, APPEND_PCM, SYNC_PCM,
         PATCH_HEADER, SYNC_FINAL_WAV, HASH_WAV, WRITE_MANIFEST, SYNC_MANIFEST, SYNC_STAGE, PUBLISH, SYNC_ROOT, VALIDATE }
+    public interface Initializer { Map<String,Long> initialize(Path root,DirectoryProtocol protocol)throws IOException; }
     public interface Faults { void before(Operation operation, Path path) throws IOException; }
     public interface DirectoryProtocol {
         void syncDirectory(Path directory) throws IOException;
@@ -89,7 +90,8 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
     private final Map<String,Long> sequences=new HashMap<String,Long>();
     private final Set<String> confirmed=new HashSet<String>();
     private final Set<String> eligible=new HashSet<String>();
-    public DirectorySpool(Path root, CachePolicy cache, DirectoryProtocol protocol, Faults faults) throws IOException {
+    public DirectorySpool(Path root, CachePolicy cache, DirectoryProtocol protocol, Faults faults) throws IOException { this(root,cache,protocol,faults,null); }
+    public DirectorySpool(Path root, CachePolicy cache, DirectoryProtocol protocol, Faults faults,Initializer initializer) throws IOException {
         if (root == null || cache == null || protocol == null || faults == null) throw new IllegalArgumentException();
         this.root = root.toAbsolutePath().normalize(); this.cache = cache; this.protocol = protocol; this.faults = faults;
         Path parent = this.root.getParent();
@@ -111,6 +113,16 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
             // cooperating creator made the root before this constructor acquired the lock.
             protocol.syncDirectory(parent); // Unsupported/failed durability blocks recording admission.
             census=inventory();
+            if(initializer!=null) {
+                if(cache.beforeWrite(census.total(),Files.getFileStore(this.root).getUsableSpace(),RetirementSentinel.MAX_FILE_BYTES)!=CachePolicy.Decision.CONTINUE)throw new StorageException(Failure.CACHE_FULL,"retirement metadata headroom unavailable",null);
+                Map<String,Long> floors=initializer.initialize(this.root,protocol);
+                if(floors==null||floors.size()>256)throw new IOException("invalid sequence floor snapshot");
+                for(Map.Entry<String,Long> e:floors.entrySet()) {
+                    if(!e.getKey().matches("[0-9a-f]{64}")||e.getValue()==null||e.getValue()<=0)throw new IOException("invalid sequence floor");
+                    sequenceFloor("segment-"+e.getKey()+"-",e.getValue());
+                }
+                census=inventory(); // Capture the initialized/replayed sentinel bytes before append admission.
+            } else if(Files.exists(this.root.resolve(RetirementSentinel.FILE_NAME),LinkOption.NOFOLLOW_LINKS)||Files.exists(this.root.resolve(RetirementSentinel.TEMP_FILE_NAME),LinkOption.NOFOLLOW_LINKS))throw new IOException("retirement floor provider required");
         } catch (IOException | RuntimeException e) {
             try { if (acquired != null) acquired.release(); }
             catch (IOException closeFailure) { e.addSuppressed(closeFailure); }
@@ -148,8 +160,7 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
                     try {
                         long used=Long.parseLong(name.substring(dash+1,dot));
                         if(used==Long.MAX_VALUE) throw new IOException("sequence exhausted");
-                        String prefix=name.substring(0,dash+1); Long old=sequences.get(prefix);
-                        sequences.put(prefix,Math.max(old==null ? 0 : old,used+1));
+                        String prefix=name.substring(0,dash+1);sequenceFloor(prefix,used+1);
                     } catch(NumberFormatException e) { throw new IOException("invalid sequence reservation",e); }
                 } else if(name.startsWith("segment-")) throw new IOException("malformed sequence reservation");
             }
@@ -161,7 +172,7 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
     }
     long chargedBytes() { return usage.total(); }
     private void budget(long growth, boolean reserveFinalization) throws IOException {
-        live(); long required = Checks.add(growth, reserveFinalization ? FINALIZATION_RESERVE : 0);
+        live(); long required = Checks.add(growth, reserveFinalization ? FINALIZATION_RESERVE : RetirementSentinel.MAX_FILE_BYTES);
         if (cache.beforeWrite(usage.total(), Files.getFileStore(root).getUsableSpace(), required) != CachePolicy.Decision.CONTINUE)
             throw new StorageException(Failure.CACHE_FULL, "STOP_AND_ALERT: preserve all staged and ready data", null);
     }
@@ -171,8 +182,10 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
     }
     private static String id(Intent intent) { return prefix(intent.epoch.captureId) + intent.sequence; }
     /** Includes empty/failed staging reservations. This suggests an ordinal; open() reserves it under the lock. */
+    private synchronized long sequenceValue(String prefix) { Long next=sequences.get(prefix);return next==null?0:next; }
+    private synchronized void sequenceFloor(String prefix,long next) { sequences.put(prefix,Math.max(sequenceValue(prefix),next)); }
     public long nextSequence(String captureId) throws IOException {
-        live(); Long next=sequences.get(prefix(captureId)); return next==null ? 0 : next;
+        live();return sequenceValue(prefix(captureId));
     }
     private Path object(String name) throws IOException {
         if (name == null || !name.matches("segment-[0-9a-f]{64}-[0-9]+\\.(part|ready|quarantine|retired)"))
@@ -188,7 +201,7 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
         if (Files.exists(root.resolve(identity + ".ready"), LinkOption.NOFOLLOW_LINKS)) throw new IOException("sequence already published");
         byte[] journal = SegmentMetadata.encodeIntent(intent);
         budget(journal.length + WavHeader.BYTES, true);
-        usage.charge(identity,0); sequences.put(prefix(intent.epoch.captureId),intent.sequence+1);
+        usage.charge(identity,0); sequenceFloor(prefix(intent.epoch.captureId),intent.sequence+1);
         op(Operation.CREATE_STAGE, stage); Files.createDirectory(stage); // CREATE_NEW reserves identity; never overwrites.
         FileChannel wav = null;
         try {
@@ -316,6 +329,7 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
         try (DirectoryStream<Path> dirs = Files.newDirectoryStream(root)) {
             for (Path p : dirs) {
                 String name = p.getFileName().toString(); if (name.equals(".writer.lock")) continue;
+                if(name.equals(RetirementSentinel.FILE_NAME)) { if(RetirementSentinel.read(root)==null)throw new IOException("missing retirement store binding");continue; }
                 if (name.matches("segment-[0-9a-f]{64}-[0-9]+\\.retired") && Files.isDirectory(p,LinkOption.NOFOLLOW_LINKS)) {
                     try (DirectoryStream<Path> retired = Files.newDirectoryStream(p)) { if (!retired.iterator().hasNext()) continue; }
                 }
@@ -397,12 +411,22 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
         String key=SpoolUsage.key(source);
         if(active!=null && key.equals(SpoolUsage.key(active.directory.getFileName().toString())))
             throw new IOException("active stage is ineligible");
-        maintenance=new Maintenance(source); return maintenance;
+        maintenance=new Maintenance(source,false); return maintenance;
+    }
+    /** Only for a DB-committed retirement floor; allows absent marker replay, never audio mutation. */
+    public synchronized Maintenance retirement(String source,long durableFloor)throws IOException {
+        if(closing||closed||maintenance!=null)throw new MaintenanceBusy();live();
+        SegmentIdentity id=SegmentIdentity.parse(source);
+        if(durableFloor<=id.sequence)throw new IOException("retirement floor does not reserve ordinal");
+        if(active!=null&&SpoolUsage.key(source).equals(SpoolUsage.key(active.directory.getFileName().toString())))throw new IOException("active source blocks retirement");
+        String prefix="segment-"+id.capture+"-";sequenceFloor(prefix,durableFloor);
+        maintenance=new Maintenance(source,true);return maintenance;
     }
     public final class Maintenance implements AutoCloseable {
         private final String source;
         private boolean released;
-        private Maintenance(String source) { this.source=source; }
+        private final boolean retirementOnly;
+        private Maintenance(String source,boolean retirementOnly) { this.source=source;this.retirementOnly=retirementOnly; }
         private void check(VerifiedLocalCleanup.Prepared binding) throws IOException {
             synchronized(DirectorySpool.this) {
                 live(); if(released || maintenance!=this || !source.equals(binding.source)) throw new IOException("stale maintenance lease");
@@ -417,12 +441,21 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
             confirmReady(source,cancellation);
         }
         public void quarantine(VerifiedLocalCleanup.Prepared binding) throws IOException {
+            if(retirementOnly)throw new IOException("retirement lease cannot delete audio");
             check(binding); synchronized(DirectorySpool.this) { if(!confirmed.contains(source)) throw new IOException("source not durably confirmed"); }
             VerifiedLocalCleanup.quarantine(root,protocol,binding);
         }
-        public void restore(VerifiedLocalCleanup.Prepared binding) throws IOException { check(binding); VerifiedLocalCleanup.restore(root,protocol,binding); }
+        public void restore(VerifiedLocalCleanup.Prepared binding) throws IOException { if(retirementOnly)throw new IOException("retirement-only lease");check(binding); VerifiedLocalCleanup.restore(root,protocol,binding); }
         public void purge(VerifiedLocalCleanup.Prepared binding) throws IOException {
+            if(retirementOnly)throw new IOException("retirement lease cannot delete audio");
             check(binding); VerifiedLocalCleanup.purge(root,protocol,binding); usage.purged(source);
+        }
+        public void verifyRetired(VerifiedLocalCleanup.Prepared binding)throws IOException {check(binding);VerifiedLocalCleanup.verifyRetired(root,binding,false);}
+        public void pruneRetired(VerifiedLocalCleanup.Prepared binding,boolean allowAbsent)throws IOException {
+            if(!retirementOnly)throw new IOException("retirement intent lease required");check(binding);
+            VerifiedLocalCleanup.pruneRetired(root,protocol,binding,allowAbsent);
+            usage.retireZero(source,allowAbsent);
+            synchronized(DirectorySpool.this){eligible.remove(SpoolUsage.key(source));confirmed.remove(source);}
         }
         @Override public void close() throws IOException {
             synchronized(DirectorySpool.this) {

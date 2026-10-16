@@ -35,4 +35,11 @@ final class SpoolUsage {
         if(charge==null) throw new IOException("unknown owner-generation charge");
         total-=charge; charges.put(key,0L);
     }
+    synchronized void retireZero(String name,boolean allowAbsent)throws IOException {
+        String key=key(name);Long charge=charges.get(key);
+        if(charge==null){if(allowAbsent)return;throw new IOException("unknown retirement charge");}
+        if(charge!=0)throw new IOException("retirement cannot discard charged bytes");charges.remove(key);
+    }
+    synchronized int objects(){return charges.size();}
+
 }

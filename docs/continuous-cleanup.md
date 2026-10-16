@@ -1,5 +1,8 @@
 # Concurrent finalized-object cleanup (dev11)
 
+Dev12 separately adds [bounded exact history retirement](history-retirement.md).
+The limits below describe the original dev11 slice.
+
 This source slice allows the already opted-in, destination-pinned dev10 cleanup
 policy to reclaim finalized recordings while a different chunk is being recorded.
 It does not change the weaker readback-at-time proof, consent, receipt database,

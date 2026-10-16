@@ -46,7 +46,7 @@ final class FtpsCoordinator {
         final Map<String,String> destinations;
         final String notice;
         final boolean busy, paused;
-        String automaticRevision, automaticNotice = "OFF", cleanupRevision, cleanupLabel = "OFF";
+        String automaticRevision, automaticNotice = "OFF", cleanupRevision, cleanupLabel = "OFF", retiredCount="0",retiredForCurrent="0",retirementNotice="";
         Snapshot(CommittedSegments.Page page,FtpsQueue.Profile profile,List<FtpsQueue.Item> items,
                 Map<String,String> destinations,String notice,boolean busy,boolean paused) {
             this.page = page; this.profile = profile; this.items = Collections.unmodifiableList(items);
@@ -86,6 +86,8 @@ final class FtpsCoordinator {
     private volatile Job activeJob;
     private volatile Snapshot snapshot = new Snapshot(null,null,new ArrayList<FtpsQueue.Item>(),new HashMap<String,String>(),"Loading local transfer state",false,false);
     private boolean unavailable;
+    private boolean retirementBlocked;
+    private String retirementNotice="";
     private final AtomicBoolean cleanupRevoked=new AtomicBoolean();
     private final AtomicBoolean cleanupDisableQueued=new AtomicBoolean();
     private final Semaphore notifications = new Semaphore(32);
@@ -110,6 +112,15 @@ final class FtpsCoordinator {
             publish("Automatic enrollment setting saved. Uncertain sources retained.",false);
             postCatchup();
         } });
+    }
+    private void capacityWait() {
+        if(queue.automaticCapacityAt()==0)queue.automaticCapacityWait(System.currentTimeMillis()+300000);
+    }
+    private void resumeCapacity() throws IOException {
+        if(queue.paused() || pauseRequested.get() || queue.automaticRevision()==null || queue.automaticCapacityAt()==0 || queue.automaticCapacityAt()>System.currentTimeMillis())return;
+        if(queue.full()){queue.automaticCapacityWait(System.currentTimeMillis()+300000);return;}
+        // One bounded names-only scan per due capacity wake; never scan in published().
+        prepareCatchup();queue.automaticCapacityScanned();catchupDeferred=false;postCatchup();
     }
     private void prepareCatchup() throws IOException {
         String revision = queue.automaticRevision(); if (revision == null) return;
@@ -136,14 +147,15 @@ final class FtpsCoordinator {
         if (queue.paused() || pauseRequested.get()) { catchupDeferred = true; return; }
         String revision = queue.automaticRevision(), id = catchup.peek();
         if (queue.contains(id,revision)) { catchup.remove(); return; }
-        if (queue.full()) { automaticBlocked("500-row queue history bound reached"); return; }
+        if (queue.full()) retireHistory();
+        if (queue.full()) { capacityWait(); catchupDeferred=true; return; }
         SpoolAdmission.Reservation reservation;
         try { reservation=SpoolAdmission.beginMaintenance(); }
         catch(IOException e) { catchupDeferred=true; return; }
         try {
             if(reservation.owner!=null) { catchupDeferred=true; return; }
             final long deadline=SystemClock.elapsedRealtime()+10000;
-            try(DirectorySpool spool=new DirectorySpool(spoolRoot(),new CachePolicy(RecordingSettings.defaults().cacheBytes,RecordingSettings.FREE_RESERVE),new AndroidDirectoryProtocol(),new DirectorySpool.Faults() { @Override public void before(DirectorySpool.Operation op,Path path) { } })) {
+            try(DirectorySpool spool=new DirectorySpool(spoolRoot(),new CachePolicy(RecordingSettings.defaults().cacheBytes,RecordingSettings.FREE_RESERVE),new AndroidDirectoryProtocol(),new DirectorySpool.Faults() { @Override public void before(DirectorySpool.Operation op,Path path) { } },new RetirementStore(context))) {
                 spool.confirmReady(id,new VerifiedExport.Cancellation() { @Override public boolean cancelled() { return SystemClock.elapsedRealtime()>=deadline || pauseRequested.get(); } });
             }
         } finally { reservation.close(); }
@@ -166,6 +178,8 @@ final class FtpsCoordinator {
                 if (revision != null) {
                     CommittedSegments.Entry entry = catalog.load(published.localObjectId);
                     if (!Arrays.equals(entry.metadata.encode(),published.metadata.encode())) throw new IOException("Published identity changed");
+                    if(queue.full())retireHistory();
+                    if(queue.full()){capacityWait();publish(queue.automaticNotice(),false);schedule(nextDelay());return;}
                     queue.enqueue(entry,revision,true); publish("Finalized chunk enrolled automatically; transfer policy and hard gates still apply.",false); schedule(nextDelay());
                 }
             } catch (IOException | RuntimeException e) {
@@ -180,8 +194,8 @@ final class FtpsCoordinator {
             try {
                 queue = new FtpsQueue(FtpsCoordinator.this.context); queue.getWritableDatabase(); queue.recover();
                 catalog = new CommittedSegments(FtpsCoordinator.this.context.getFilesDir().toPath().toRealPath().resolve("audio-spool"));
-                replayCleanup();
-                try { prepareCatchup(); postCatchup(); }
+                replayCleanup(); retireHistory();
+                try { if(queue.automaticCapacityAt()==0){prepareCatchup(); postCatchup();} }
                 catch (IOException e) { automaticBlocked("Discovery failed"); }
                 publish("Transfer state restored. Review automatic enrollment status below.",false);
                 schedule(nextDelay()); // Repairs a crash after queue commit but before scheduler submission.
@@ -209,6 +223,7 @@ final class FtpsCoordinator {
         }
         updated.cleanupRevision=queue.cleanupRevision();
         if(updated.cleanupRevision!=null) { FtpsQueue.Profile p=queue.profile(updated.cleanupRevision); updated.cleanupLabel="ON: " + (p==null ? "Unavailable" : p.label()); }
+        updated.retiredCount=queue.retiredCount();updated.retiredForCurrent=updated.profile==null?"0":queue.retiredCount(updated.profile.revision);updated.retirementNotice=retirementNotice;
         snapshot = updated;
     }
     private interface Command { void run() throws Exception; default void discard() { } }
@@ -290,7 +305,7 @@ final class FtpsCoordinator {
         DirectorySpool spool=reservation.owner;
         boolean idle=spool==null;
         try {
-            if(idle) spool=new DirectorySpool(spoolRoot(),new CachePolicy(RecordingSettings.defaults().cacheBytes,RecordingSettings.FREE_RESERVE),new AndroidDirectoryProtocol(),new DirectorySpool.Faults() { @Override public void before(DirectorySpool.Operation op,Path path) { } });
+            if(idle) spool=new DirectorySpool(spoolRoot(),new CachePolicy(RecordingSettings.defaults().cacheBytes,RecordingSettings.FREE_RESERVE),new AndroidDirectoryProtocol(),new DirectorySpool.Faults() { @Override public void before(DirectorySpool.Operation op,Path path) { } },new RetirementStore(context));
             DirectorySpool.Maintenance acquired;
             try { acquired=spool.maintenance(source); } catch(DirectorySpool.MaintenanceBusy e) { throw new CleanupDeferred(); }
             try(DirectorySpool.Maintenance lease=acquired) {
@@ -300,6 +315,49 @@ final class FtpsCoordinator {
             }
         } finally {
             try { if(idle && spool!=null) spool.close(); } finally { reservation.close(); }
+        }
+    }
+    /** Bounded empty-marker/history compaction only. Never removes a WAV or its metadata. */
+    private void retireHistory() {
+        if(unavailable||retirementBlocked||queue.paused()||pauseRequested.get())return;
+        SpoolAdmission.Reservation reservation;
+        try{reservation=SpoolAdmission.beginMaintenance();}catch(IOException busy){return;}
+        DirectorySpool spool=reservation.owner;boolean idle=spool==null;
+        try {
+            if(idle)spool=new DirectorySpool(spoolRoot(),new CachePolicy(RecordingSettings.defaults().cacheBytes,RecordingSettings.FREE_RESERVE),new AndroidDirectoryProtocol(),new DirectorySpool.Faults(){@Override public void before(DirectorySpool.Operation op,Path path){}},new RetirementStore(context));
+            Map<String,FtpsQueue.Item> pending=RetirementStore.pending(queue);
+            List<FtpsQueue.Item> work=new ArrayList<FtpsQueue.Item>(pending.values());
+            for(FtpsQueue.Item candidate:queue.retirementCandidates())if(!pending.containsKey(candidate.source)&&work.size()<FtpsQueue.MAX_RETIRING){work.add(candidate);pending.put(candidate.source,candidate);}
+            int handled=0;
+            for(FtpsQueue.Item item:work) {
+                if(handled++>=FtpsQueue.MAX_RETIRING||pauseRequested.get())break;
+                VerifiedLocalCleanup.Prepared binding=VerifiedLocalCleanup.decode(item.cleanupBinding,new AndroidCleanupIdentity());
+                if(!binding.source.equals(item.source))throw new IOException("retirement source binding mismatch");
+                long generation=item.retirementGeneration;
+                if(generation<0) {
+                    // Validate original empty inode before creating durable dedup/floor intent.
+                    try(DirectorySpool.Maintenance proof=spool.maintenance(item.source)) {
+                        proof.verifyRetired(binding);
+                        generation=queue.beginRetirement(item);
+                        if(generation>=0)RetirementStore.synchronize(queue,spoolRoot(),new AndroidDirectoryProtocol());
+                    }
+                    if(generation<0)continue;
+                }
+                io.github.headmaster218.recorder.core.SegmentIdentity id=io.github.headmaster218.recorder.core.SegmentIdentity.parse(item.source);
+                Long floor=queue.floors().get(id.capture);if(floor==null)throw new IOException("retirement floor missing");
+                try(DirectorySpool.Maintenance lease=spool.retirement(item.source,floor)) {
+                    RetirementStore.synchronize(queue,spoolRoot(),new AndroidDirectoryProtocol());
+                    lease.pruneRetired(binding,true);
+                    queue.finishRetirement(item.source,generation);
+                }
+            }
+        } catch(DirectorySpool.MaintenanceBusy busy) {
+            // A closing capture still owns the lock; the retained rows resume on the next owner.
+        } catch(IOException|RuntimeException failed) {
+            retirementBlocked=true;retirementNotice="History retirement stopped safely ("+failed.getClass().getSimpleName()+"). Detailed receipts/uncertain markers retained; inspect before retrying.";
+        } finally {
+            try{if(idle&&spool!=null)spool.close();}catch(IOException|RuntimeException failed){retirementBlocked=true;retirementNotice="Retirement storage close failed; inspection required.";}
+            finally{reservation.close();}
         }
     }
     private static boolean cleanupPending(FtpsQueue.Item item) {
@@ -394,7 +452,8 @@ final class FtpsCoordinator {
             try {
                 if (!unavailable && !pauseRequested.get()) {
                     job.deadline = SystemClock.elapsedRealtime() + FtpsNetwork.ATTEMPT_MILLIS;
-                    runOne(job);
+                    runOne(job); retireHistory();
+                    try{resumeCapacity();}catch(IOException e){automaticBlocked("Capacity discovery bounds or validation failed");}
                 }
                 if (!unavailable) {
                     if (pauseRequested.get()) queue.pause(true);
@@ -543,6 +602,8 @@ final class FtpsCoordinator {
         for(FtpsQueue.Item item:queue.items(false)) if(cleanupPending(item)
             || (!cleanupRevoked.get() && item.revision.equals(queue.cleanupRevision()) && (item.cleanupState.equals("DEFERRED") || item.cleanupState.equals("RECHECKING") || (item.cleanupState.equals("WAIT_SOURCE") && !queue.otherNeedsSource(item)))))
             soonest=Math.min(soonest,Math.max(ExportCoordinator.cleanupBlocked() ? 300000 : 5000,item.nextAt-now));
+        if(queue.automaticRevision()!=null&&queue.automaticCapacityAt()!=0)soonest=Math.min(soonest,Math.max(0,queue.automaticCapacityAt()-now));
+        if(!retirementBlocked&&(!queue.retiring().isEmpty()||!queue.retirementCandidates().isEmpty()))soonest=Math.min(soonest,300000);
         // Persist a wake while catch-up remains, covering death between confirmations.
         if (queue.automaticRevision() != null && catchup != null && !catchup.isEmpty())
             soonest = Math.min(soonest,300000);

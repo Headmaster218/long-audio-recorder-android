@@ -127,4 +127,20 @@ public final class VerifiedLocalCleanup {
         // Keep the original directory inode as an empty ordinal reservation. Never reuse a deleted ID.
         protocol.atomicPublish(target,retired); protocol.syncDirectory(root);
     }
+    /** Empty ordinal marker only. The caller separately proves committed retirement intent. */
+    public static boolean verifyRetired(Path root,Prepared p,boolean allowAbsent)throws IOException {
+        Path source=ready(root,p),target=quarantine(root,p);
+        Path retired=root.resolve(p.source.substring(0,p.source.length()-6)+".retired");
+        Path partial=root.resolve(p.source.substring(0,p.source.length()-6)+".part");
+        if(exists(source)||exists(target)||exists(partial))throw new IOException("live/partial source blocks retirement");
+        if(!exists(retired)){if(allowAbsent)return false;throw new IOException("missing retired marker");}
+        p.directory.check(retired,true,true,p.identity);
+        try(DirectoryStream<Path> entries=Files.newDirectoryStream(retired)){if(entries.iterator().hasNext())throw new IOException("retired marker is not empty");}
+        return true;
+    }
+    static void pruneRetired(Path root,DirectorySpool.DirectoryProtocol protocol,Prepared p,boolean allowAbsent)throws IOException {
+        if(verifyRetired(root,p,allowAbsent)) Files.delete(root.resolve(p.source.substring(0,p.source.length()-6)+".retired"));
+        protocol.syncDirectory(root);
+    }
+
 }

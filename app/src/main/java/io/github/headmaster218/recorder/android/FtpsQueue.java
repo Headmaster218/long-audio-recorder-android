@@ -14,10 +14,17 @@ import java.util.ArrayList;
 import java.util.List;
 import io.github.headmaster218.recorder.core.CommittedSegments;
 import io.github.headmaster218.recorder.core.FtpsTransfer;
+import io.github.headmaster218.recorder.core.SegmentIdentity;
+import io.github.headmaster218.recorder.core.RetirementRanges;
+import java.util.Map;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.UUID;
 
-/** Accessed only by FtpsCoordinator's single worker. No spool/source write or delete API. */
+/** Queue mutations use the transfer worker; startup reconciles history under physical spool ownership. No filesystem API. */
 final class FtpsQueue extends SQLiteOpenHelper {
     static final int MAX_ROWS = 500, MAX_PROFILES = 32, MAX_RECONCILIATIONS = 3;
+    static final int MAX_RANGES=2048, MAX_CAPTURES=256, MAX_GROUPS=512, MAX_RETIRING=8;
     static final class Profile {
         final String revision;
         final FtpsTransfer.Profile destination;
@@ -29,7 +36,7 @@ final class FtpsQueue extends SQLiteOpenHelper {
             + " [" + revision.substring(0, 12) + "]"; }
     }
     static final class Item {
-        final long key, bytes, queuedAt, nextAt, verifiedAt;
+        final long key, bytes, queuedAt, nextAt, verifiedAt, retirementGeneration;
         final String source, revision, wavHash, metadataHash, state, attempt, detail, resultMetadataHash, markerHash;
         final int reconciliations;
         final boolean uploadNow;
@@ -42,12 +49,12 @@ final class FtpsQueue extends SQLiteOpenHelper {
             uploadNow = c.getInt(11) != 0; detail = c.getString(12);
             resultMetadataHash = c.isNull(13) ? null : c.getString(13); markerHash = c.isNull(14) ? null : c.getString(14);
             verifiedAt = c.isNull(15) ? 0 : c.getLong(15);
-            cleanupState = c.getString(16); cleanupBinding = c.isNull(17) ? null : c.getBlob(17);
+            cleanupState = c.getString(16); cleanupBinding = c.isNull(17) ? null : c.getBlob(17); retirementGeneration=c.isNull(18) ? -1 : c.getLong(18);
         }
     }
     FtpsQueue(Context c) {
         // Queue, profiles and encrypted credentials are excluded from backup independently of manifest settings.
-        super(c, new File(c.getNoBackupFilesDir(), "ftps-queue.db").getAbsolutePath(), null, 3);
+        super(c, new File(c.getNoBackupFilesDir(), "ftps-queue.db").getAbsolutePath(), null, 4);
     }
     @Override public void onConfigure(SQLiteDatabase db) {
         db.setForeignKeyConstraintsEnabled(true);
@@ -55,20 +62,137 @@ final class FtpsQueue extends SQLiteOpenHelper {
     }
     @Override public void onCreate(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE profiles(revision TEXT PRIMARY KEY, host TEXT NOT NULL, port INTEGER NOT NULL, user TEXT NOT NULL, directory TEXT NOT NULL, credential BLOB)");
-        db.execSQL("CREATE TABLE settings(id INTEGER PRIMARY KEY CHECK(id=1), current_revision TEXT REFERENCES profiles(revision), paused INTEGER NOT NULL DEFAULT 0, auto_revision TEXT REFERENCES profiles(revision), auto_notice TEXT NOT NULL DEFAULT 'OFF', cleanup_revision TEXT REFERENCES profiles(revision))");
+        db.execSQL("CREATE TABLE settings(id INTEGER PRIMARY KEY CHECK(id=1), current_revision TEXT REFERENCES profiles(revision), paused INTEGER NOT NULL DEFAULT 0, auto_revision TEXT REFERENCES profiles(revision), auto_notice TEXT NOT NULL DEFAULT 'OFF', cleanup_revision TEXT REFERENCES profiles(revision), auto_capacity_at INTEGER NOT NULL DEFAULT 0)");
         db.execSQL("INSERT INTO settings(id,paused) VALUES(1,0)");
-        db.execSQL("CREATE TABLE queue(id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, revision TEXT NOT NULL REFERENCES profiles(revision), wav_hash TEXT NOT NULL, metadata_hash TEXT NOT NULL, bytes INTEGER NOT NULL, queued_at INTEGER NOT NULL, state TEXT NOT NULL, attempt TEXT, reconciliations INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL DEFAULT 0, upload_now INTEGER NOT NULL DEFAULT 0, detail TEXT NOT NULL, result_metadata_hash TEXT, marker_hash TEXT, verified_at INTEGER, cleanup_state TEXT NOT NULL DEFAULT 'NONE', cleanup_binding BLOB, UNIQUE(source,revision))");
+        db.execSQL("CREATE TABLE queue(id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, revision TEXT NOT NULL REFERENCES profiles(revision), wav_hash TEXT NOT NULL, metadata_hash TEXT NOT NULL, bytes INTEGER NOT NULL, queued_at INTEGER NOT NULL, state TEXT NOT NULL, attempt TEXT, reconciliations INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL DEFAULT 0, upload_now INTEGER NOT NULL DEFAULT 0, detail TEXT NOT NULL, result_metadata_hash TEXT, marker_hash TEXT, verified_at INTEGER, cleanup_state TEXT NOT NULL DEFAULT 'NONE', cleanup_binding BLOB, retirement_generation INTEGER, UNIQUE(source,revision))");
         db.execSQL("CREATE INDEX runnable ON queue(state,next_at,id)");
+        createHistory(db);
     }
     @Override public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
-        if (oldVersion < 1 || oldVersion > 2 || newVersion != 3) throw new IllegalStateException("Unsupported FTPS queue migration");
+        if (oldVersion < 1 || oldVersion > 3 || newVersion != 4) throw new IllegalStateException("Unsupported FTPS queue migration");
         if (oldVersion == 1) {
             db.execSQL("ALTER TABLE settings ADD COLUMN auto_revision TEXT REFERENCES profiles(revision)");
             db.execSQL("ALTER TABLE settings ADD COLUMN auto_notice TEXT NOT NULL DEFAULT 'OFF'");
         }
+        if(oldVersion<3) {
         db.execSQL("ALTER TABLE settings ADD COLUMN cleanup_revision TEXT REFERENCES profiles(revision)");
         db.execSQL("ALTER TABLE queue ADD COLUMN cleanup_state TEXT NOT NULL DEFAULT 'NONE'");
         db.execSQL("ALTER TABLE queue ADD COLUMN cleanup_binding BLOB");
+        }
+        db.execSQL("ALTER TABLE queue ADD COLUMN retirement_generation INTEGER");
+        db.execSQL("ALTER TABLE settings ADD COLUMN auto_capacity_at INTEGER NOT NULL DEFAULT 0");
+        createHistory(db);
+    }
+    private static void createHistory(SQLiteDatabase db) {
+        db.execSQL("CREATE TABLE retirement_meta(id INTEGER PRIMARY KEY CHECK(id=1),store_id TEXT,generation INTEGER NOT NULL DEFAULT 0,ready INTEGER NOT NULL DEFAULT 0)");
+        db.execSQL("INSERT INTO retirement_meta(id,generation,ready) VALUES(1,0,0)");
+        db.execSQL("CREATE TABLE retired_ranges(revision TEXT NOT NULL REFERENCES profiles(revision),capture TEXT NOT NULL,lo INTEGER NOT NULL CHECK(lo>=0),hi INTEGER NOT NULL CHECK(hi>=lo),PRIMARY KEY(revision,capture,lo))");
+        db.execSQL("CREATE TABLE sequence_floors(capture TEXT PRIMARY KEY,next_sequence INTEGER NOT NULL CHECK(next_sequence>0))");
+        db.execSQL("CREATE INDEX retirement_pending ON queue(retirement_generation,source)");
+    }
+    static final class HistoryMeta {
+        final String store;final long generation;final boolean ready;
+        HistoryMeta(String store,long generation,boolean ready){this.store=store;this.generation=generation;this.ready=ready;}
+    }
+    HistoryMeta historyMeta(boolean initialize)throws IOException {
+        SQLiteDatabase db=getWritableDatabase();
+        if(initialize) {
+            db.beginTransaction();try {
+                ContentValues value=new ContentValues();value.put("store_id",UUID.randomUUID().toString());
+                db.update("retirement_meta",value,"id=1 AND store_id IS NULL",null);db.setTransactionSuccessful();
+            } finally {db.endTransaction();}
+        }
+        try(Cursor c=db.rawQuery("SELECT store_id,generation,ready FROM retirement_meta WHERE id=1",null)) {
+            if(!c.moveToFirst())throw new IOException("missing retirement metadata");
+            String store=c.isNull(0)?null:c.getString(0);long gen=c.getLong(1);
+            if(c.isNull(2)||(c.getInt(2)!=0&&c.getInt(2)!=1)||gen<0 || (store!=null&&!store.matches("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")))throw new IOException("invalid retirement metadata");
+            return new HistoryMeta(store,gen,c.getInt(2)==1);
+        }
+    }
+    void historyReady() {ContentValues v=new ContentValues();v.put("ready",1);getWritableDatabase().update("retirement_meta",v,"id=1",null);}
+    boolean emptyRetirement(){return count("retired_ranges")==0&&count("sequence_floors")==0&&retiring().isEmpty();}
+    Map<String,Long> floors()throws IOException {
+        Map<String,Long> result=new HashMap<String,Long>();
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT capture,next_sequence FROM sequence_floors",null)) {
+            while(c.moveToNext()) {String key=c.getString(0);long next=c.getLong(1);if(!key.matches("[0-9a-f]{64}")||next<=0||result.size()>=MAX_CAPTURES)throw new IOException("invalid sequence floor");result.put(key,next);}
+        }return result;
+    }
+    boolean retiredContains(String source,String revision) {
+        final SegmentIdentity id;try{id=SegmentIdentity.parse(source);}catch(IOException e){return false;}
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT lo FROM retired_ranges WHERE revision=? AND capture=? AND lo<=? AND hi>=? LIMIT 1",new String[]{revision,id.capture,String.valueOf(id.sequence),String.valueOf(id.sequence)})){return c.moveToFirst();}
+    }
+    String retiredCount() { return retiredCount(null); }
+    String retiredCount(String revision) {
+        java.math.BigInteger total=java.math.BigInteger.ZERO;
+        try(Cursor c=getReadableDatabase().rawQuery(revision==null?"SELECT lo,hi FROM retired_ranges":"SELECT lo,hi FROM retired_ranges WHERE revision=?",revision==null?null:new String[]{revision})) {while(c.moveToNext())total=total.add(java.math.BigInteger.valueOf(c.getLong(1)).subtract(java.math.BigInteger.valueOf(c.getLong(0))).add(java.math.BigInteger.ONE));}
+        return total.toString();
+    }
+    List<Item> retiring() {
+        List<Item> result=new ArrayList<Item>();for(Item item:items(false))if(item.retirementGeneration>=0)result.add(item);return result;
+    }
+    List<Item> retirementCandidates() {
+        List<Item> result=new ArrayList<Item>();for(Item item:items(false))if(item.cleanupState.equals("REMOVED")&&item.retirementGeneration<0)result.add(item);return result;
+    }
+    private List<Item> sourceRows(String source) {List<Item> result=new ArrayList<Item>();for(Item item:items(false))if(item.source.equals(source))result.add(item);return result;}
+    private boolean verifiedRows(List<Item> rows,Item proof) {
+        if(rows.isEmpty()||!proof.cleanupState.equals("REMOVED")||proof.cleanupBinding==null)return false;
+        for(Item row:rows)if(!row.state.equals("VERIFIED_AT_TIME")||row.verifiedAt<=0||row.attempt==null||row.resultMetadataHash==null||row.markerHash==null||row.bytes<=0||!row.revision.matches("[0-9a-f]{64}")||!row.wavHash.matches("[0-9a-f]{64}")||!row.metadataHash.matches("[0-9a-f]{64}")||!row.markerHash.matches("[0-9a-f]{64}")||!row.resultMetadataHash.matches("[0-9a-f]{64}")||!row.wavHash.equals(proof.wavHash)||!row.metadataHash.equals(proof.metadataHash)||row.bytes!=proof.bytes
+            || !(row.cleanupState.equals("REMOVED")||row.cleanupState.equals("NONE")||row.cleanupState.equals("RETAINED")||row.cleanupState.equals("RESTORED")))return false;
+        return true;
+    }
+    void validateHistoryBounds()throws IOException {
+        if(count("retired_ranges")>MAX_RANGES||count("sequence_floors")>MAX_CAPTURES)throw new IOException("history bounds exceeded");
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT count(*) FROM (SELECT revision,capture FROM retired_ranges GROUP BY revision,capture)",null)){c.moveToFirst();if(c.getLong(0)>MAX_GROUPS)throw new IOException("history group cap exceeded");}
+        Map<String,Long> floors=floors();String group=null;long previous=-2;
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT revision,capture,lo,hi FROM retired_ranges ORDER BY revision,capture,lo",null)) {
+            while(c.moveToNext()) {
+                String revision=c.getString(0),capture=c.getString(1);long lo=c.getLong(2),hi=c.getLong(3);
+                new RetirementRanges.Range(lo,hi);
+                if(!revision.matches("[0-9a-f]{64}")||!capture.matches("[0-9a-f]{64}")||!floors.containsKey(capture)||floors.get(capture)<=hi)throw new IOException("interval floor mismatch");
+                String next=revision+capture;if(next.equals(group)&&lo<=previous+1)throw new IOException("noncanonical interval history");group=next;previous=hi;
+            }
+        }
+    }
+    void validateRetirement(Item proof)throws IOException {
+        List<Item> rows=sourceRows(proof.source);HistoryMeta meta=historyMeta(false);SegmentIdentity id=SegmentIdentity.parse(proof.source);
+        if(!verifiedRows(rows,proof)||proof.retirementGeneration<=0||proof.retirementGeneration>meta.generation)throw new IOException("invalid retained retirement proof");
+        Map<String,Long> floors=floors();if(!floors.containsKey(id.capture)||floors.get(id.capture)<=id.sequence)throw new IOException("missing committed floor");
+        for(Item row:rows)if(row.retirementGeneration!=proof.retirementGeneration||!retiredContains(row.source,row.revision))throw new IOException("partial retirement transaction");
+    }
+    /** Caller holds exact empty-marker maintenance proof. Retained rows are the bounded prune intent. */
+    long beginRetirement(Item proof)throws IOException {
+        SQLiteDatabase db=getWritableDatabase();db.beginTransaction();
+        try {
+            List<Item> rows=sourceRows(proof.source);if(!verifiedRows(rows,proof))return -1;
+            for(Item row:rows)if(row.retirementGeneration>=0)return row.retirementGeneration;
+            Map<String,Boolean> pending=new HashMap<String,Boolean>();for(Item row:retiring())pending.put(row.source,true);
+            if(pending.size()>=MAX_RETIRING)throw new IOException("retirement pending cap");
+            HistoryMeta meta=historyMeta(false);if(!meta.ready||meta.store==null||meta.generation==Long.MAX_VALUE)throw new IOException("retirement store unavailable/exhausted");
+            SegmentIdentity id=SegmentIdentity.parse(proof.source);long gen=meta.generation+1;
+            for(Item row:rows) {
+                List<RetirementRanges.Range> old=new ArrayList<RetirementRanges.Range>();
+                try(Cursor c=db.rawQuery("SELECT lo,hi FROM retired_ranges WHERE revision=? AND capture=? ORDER BY lo",new String[]{row.revision,id.capture})) {while(c.moveToNext())old.add(new RetirementRanges.Range(c.getLong(0),c.getLong(1)));}
+                List<RetirementRanges.Range> merged=RetirementRanges.add(old,id.sequence);
+                db.delete("retired_ranges","revision=? AND capture=?",new String[]{row.revision,id.capture});
+                for(RetirementRanges.Range range:merged){ContentValues v=new ContentValues();v.put("revision",row.revision);v.put("capture",id.capture);v.put("lo",range.low);v.put("hi",range.high);db.insertOrThrow("retired_ranges",null,v);}
+            }
+            long floor=id.sequence+1;try(Cursor c=db.rawQuery("SELECT next_sequence FROM sequence_floors WHERE capture=?",new String[]{id.capture})){if(c.moveToFirst())floor=Math.max(floor,c.getLong(0));}
+            ContentValues f=new ContentValues();f.put("capture",id.capture);f.put("next_sequence",floor);db.insertWithOnConflict("sequence_floors",null,f,SQLiteDatabase.CONFLICT_REPLACE);
+            if(count("retired_ranges")>MAX_RANGES||count("sequence_floors")>MAX_CAPTURES)throw new IOException("retired history cap; detailed receipts retained");
+            try(Cursor c=db.rawQuery("SELECT count(*) FROM (SELECT revision,capture FROM retired_ranges GROUP BY revision,capture)",null)){c.moveToFirst();if(c.getLong(0)>MAX_GROUPS)throw new IOException("retired group cap");}
+            ContentValues marker=new ContentValues();marker.put("retirement_generation",gen);db.update("queue",marker,"source=?",new String[]{proof.source});
+            ContentValues generation=new ContentValues();generation.put("generation",gen);db.update("retirement_meta",generation,"id=1",null);
+            db.setTransactionSuccessful();return gen;
+        } finally {db.endTransaction();}
+    }
+    void finishRetirement(String source,long generation)throws IOException {
+        SQLiteDatabase db=getWritableDatabase();db.beginTransaction();try {
+            List<Item> rows=sourceRows(source);if(rows.isEmpty())throw new IOException("missing retirement intent");
+            Item proof=null;for(Item row:rows)if(row.cleanupState.equals("REMOVED")&&row.cleanupBinding!=null)proof=row;
+            if(proof==null||!verifiedRows(rows,proof))throw new IOException("retirement rows changed");
+            for(Item row:rows)if(row.retirementGeneration!=generation||!retiredContains(source,row.revision))throw new IOException("retirement interval mismatch");
+            db.delete("queue","source=? AND retirement_generation=?",new String[]{source,String.valueOf(generation)});db.setTransactionSuccessful();
+        }finally{db.endTransaction();}
     }
     String cleanupRevision() {
         try (Cursor c = getReadableDatabase().rawQuery("SELECT cleanup_revision FROM settings WHERE id=1",null)) { c.moveToFirst(); return c.isNull(0) ? null : c.getString(0); }
@@ -145,10 +269,23 @@ final class FtpsQueue extends SQLiteOpenHelper {
         try (Cursor c = getReadableDatabase().rawQuery("SELECT auto_notice FROM settings WHERE id=1",null)) { c.moveToFirst(); return c.getString(0); }
     }
     void automatic(String revision, String notice) {
-        ContentValues v = new ContentValues(); v.put("auto_revision",revision); v.put("auto_notice",notice);
+        ContentValues v = new ContentValues(); v.put("auto_revision",revision); v.put("auto_notice",notice); v.put("auto_capacity_at",0);
         getWritableDatabase().update("settings",v,"id=1",null);
     }
+    long automaticCapacityAt() {
+        try(Cursor c=getReadableDatabase().rawQuery("SELECT auto_capacity_at FROM settings WHERE id=1",null)){c.moveToFirst();return c.getLong(0);}
+    }
+    void automaticCapacityWait(long nextAt) {
+        ContentValues v=new ContentValues();v.put("auto_capacity_at",nextAt);
+        v.put("auto_notice","ON: waiting for queue capacity; destination consent retained. Historical catch-up waits until recording stops.");
+        getWritableDatabase().update("settings",v,"id=1 AND auto_revision IS NOT NULL",null);
+    }
+    void automaticCapacityScanned() {
+        ContentValues v=new ContentValues();v.put("auto_capacity_at",0);v.put("auto_notice","ON: capacity catch-up discovered; historical confirmation may wait until recording stops.");
+        getWritableDatabase().update("settings",v,"id=1 AND auto_revision IS NOT NULL",null);
+    }
     boolean contains(String source, String revision) {
+        if(retiredContains(source,revision))return true;
         try (Cursor c = getReadableDatabase().rawQuery("SELECT id FROM queue WHERE source=? AND revision=?",new String[]{source,revision})) { return c.moveToFirst(); }
     }
     boolean full() { return count("queue") >= MAX_ROWS; }
@@ -156,6 +293,7 @@ final class FtpsQueue extends SQLiteOpenHelper {
     boolean enqueue(CommittedSegments.Entry entry, String revision, boolean automatic) throws IOException {
         SQLiteDatabase db = getWritableDatabase(); db.beginTransaction();
         try {
+            if(retiredContains(entry.id,revision)) { db.setTransactionSuccessful(); return false; }
             try (Cursor c = db.rawQuery("SELECT id FROM queue WHERE source=? AND revision=?", new String[]{entry.id,revision})) {
                 if (c.moveToFirst()) { db.setTransactionSuccessful(); return false; }
             }
@@ -170,7 +308,7 @@ final class FtpsQueue extends SQLiteOpenHelper {
     List<Item> items(boolean runnableOnly) {
         List<Item> result = new ArrayList<Item>();
         String where = runnableOnly ? " WHERE state IN ('QUEUED','RECONCILE')" : "";
-        try (Cursor c = getReadableDatabase().rawQuery("SELECT id,source,revision,wav_hash,metadata_hash,bytes,queued_at,state,attempt,reconciliations,next_at,upload_now,detail,result_metadata_hash,marker_hash,verified_at,cleanup_state,cleanup_binding FROM queue" + where + " ORDER BY id",null)) {
+        try (Cursor c = getReadableDatabase().rawQuery("SELECT id,source,revision,wav_hash,metadata_hash,bytes,queued_at,state,attempt,reconciliations,next_at,upload_now,detail,result_metadata_hash,marker_hash,verified_at,cleanup_state,cleanup_binding,retirement_generation FROM queue" + where + " ORDER BY id",null)) {
             while (c.moveToNext()) result.add(new Item(c));
         }
         return result;

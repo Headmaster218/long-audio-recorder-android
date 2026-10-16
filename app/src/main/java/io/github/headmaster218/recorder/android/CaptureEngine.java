@@ -108,7 +108,7 @@ final class CaptureEngine implements Runnable {
             Path root = context.getFilesDir().toPath().resolve("audio-spool");
             evidence.openingSpool();
             Object admission=SpoolAdmission.beginCapture();
-            try { spool = new DirectorySpool(root,new CachePolicy(settings.cacheBytes,RecordingSettings.FREE_RESERVE),new AndroidDirectoryProtocol(),new DirectorySpool.Faults() { @Override public void before(DirectorySpool.Operation op,Path path) { } }); SpoolAdmission.opened(admission,spool); }
+            try { spool = new DirectorySpool(root,new CachePolicy(settings.cacheBytes,RecordingSettings.FREE_RESERVE),new AndroidDirectoryProtocol(),new DirectorySpool.Faults() { @Override public void before(DirectorySpool.Operation op,Path path) { } },new RetirementStore(context)); SpoolAdmission.opened(admission,spool); }
             catch(IOException | RuntimeException e) { SpoolAdmission.abandonOpening(admission); throw e; }
             long sequence = spool.nextSequence(captureId);
             if (stop == Stop.NONE) {
