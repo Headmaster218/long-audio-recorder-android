@@ -19,6 +19,7 @@ import io.github.headmaster218.recorder.core.CleanPauseGate;
 import io.github.headmaster218.recorder.core.CaptureEvidence;
 import io.github.headmaster218.recorder.core.RecoveryJournal;
 import io.github.headmaster218.recorder.core.RecoverySession;
+import io.github.headmaster218.recorder.core.NotificationBoundary;
 
 /** Explicit visible starts only. No boot receiver, sticky restart, background permission or upload work. */
 public final class RecordingService extends Service {
@@ -26,12 +27,18 @@ public final class RecordingService extends Service {
     private static final String CHANNEL = "visible-recording";
     private static final int NOTIFICATION = 10, RESULT_NOTIFICATION = 11;
     private final Handler main = new Handler(Looper.getMainLooper());
-    private boolean foreground, destroyed;
+    private boolean foreground, destroyed, notificationFailed;
     private NotificationManager notifications;
     @Override public void onCreate() {
-        super.onCreate(); notifications = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-        NotificationChannel channel = new NotificationChannel(CHANNEL,"Visible microphone recording",NotificationManager.IMPORTANCE_LOW);
-        channel.setDescription("Recording notification controls and interruption notices"); notifications.createNotificationChannel(channel);
+        super.onCreate();
+        try {
+            notifications = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+            NotificationChannel channel = new NotificationChannel(CHANNEL,"Visible microphone recording",NotificationManager.IMPORTANCE_LOW);
+            channel.setDescription("Recording notification controls and interruption notices"); notifications.createNotificationChannel(channel);
+        } catch (RuntimeException notificationFailure) {
+            notificationFailed = true;
+            RecorderState.status = "Notification setup is unavailable; microphone recording is not authorized.";
+        }
     }
     static boolean notificationsVisible(Context c) {
         if (Build.VERSION.SDK_INT >= 33 && c.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return false;
@@ -69,7 +76,7 @@ public final class RecordingService extends Service {
         String capture = UUID.randomUUID().toString(); long epoch = 0; boolean resume = false;
         try {
             final RecordingSettings settings = RecordingSettings.from(intent);
-            if (!permissionsReady(this)) throw new SecurityException("Microphone permission and visible notifications are required");
+            if (notificationFailed || !permissionsReady(this)) throw new SecurityException("Microphone permission and visible notifications are required");
             CleanPauseGate.Resume cleanPause = RecorderState.takeCleanPause();
             if (cleanPause != null) {
                 capture = cleanPause.captureId; epoch = cleanPause.nextEpoch; resume = true;
@@ -82,29 +89,37 @@ public final class RecordingService extends Service {
             RecoverySession created = new RecoverySession(capture,epoch,resume,new RecoverySession.Host() {
                 @Override public long nowMillis() { return android.os.SystemClock.elapsedRealtime(); }
                 @Override public boolean authorized() {
-                    return session == binding[0] && heldSession == binding[0] && !destroyed && foreground && permissionsReady(RecordingService.this);
+                    return session == binding[0] && heldSession == binding[0] && !destroyed && foreground && !notificationFailed && permissionsReady(RecordingService.this);
                 }
                 @Override public void post(Runnable work) { main.post(work); }
                 @Override public void postDelayed(Runnable work,long delay) { main.postDelayed(work,delay); }
                 @Override public void remove(Runnable work) { main.removeCallbacks(work); }
                 @Override public void status(String text) {
                     if (heldSession != binding[0]) return;
-                    RecorderState.status = text;
-                    if (!destroyed && foreground && notificationsVisible(RecordingService.this)) notifications.notify(NOTIFICATION,notification(text,true));
+                    RecorderState.status = notificationFailed ? "Notification delivery is unavailable. " + text : text;
+                    if (!destroyed && foreground && !notificationFailed && !NotificationBoundary.publish(publication(text,true))) {
+                        // Latch before posting: later successful queries cannot revive this session.
+                        notificationFailed = true;
+                        RecorderState.status = "Notification delivery is unavailable; stopping microphone safely. " + text;
+                        main.post(new Runnable() { @Override public void run() {
+                            if (session == binding[0] && heldSession == binding[0]) binding[0].authorityUnavailable();
+                        } });
+                    }
                 }
                 @Override public void finished(String text,boolean paused,long nextEpoch,boolean admissionReleased) {
                     if (heldSession != binding[0]) return;
-                    if (admissionReleased) {
-                        heldSession = null;
-                        if (session == binding[0]) session = null;
-                        RecorderState.finish(RecordingService.this,text,paused,captureId,nextEpoch);
-                    } else {
-                        RecorderState.active = true; // Admission blocked, not a claim that microphone capture is active.
-                        RecorderState.status = text;
+                    try {
+                        if (admissionReleased) {
+                            heldSession = null;
+                            if (session == binding[0]) session = null;
+                            RecorderState.finish(RecordingService.this,text,paused && !notificationFailed,captureId,nextEpoch);
+                        } else {
+                            RecorderState.active = true; // Admission blocked, not a claim that microphone capture is active.
+                            RecorderState.status = text;
+                        }
+                    } finally {
+                        finishNotifications(text);
                     }
-                    if (foreground) { stopForeground(STOP_FOREGROUND_REMOVE); foreground = false; }
-                    if (!destroyed && notificationsVisible(RecordingService.this)) notifications.notify(RESULT_NOTIFICATION,notification(text,false));
-                    stopSelf();
                 }
             },new RecoverySession.Engines() {
                 @Override public RecoverySession.Attempt create(String captureId,long nextEpoch,boolean resumed,RecoverySession.Events events) {
@@ -140,10 +155,21 @@ public final class RecordingService extends Service {
             try {
                 RecorderState.finish(this,"Recording did not start: " + e.getClass().getSimpleName() + ": " + e.getMessage(),false,capture,epoch);
             } finally {
-                if (foreground) { stopForeground(STOP_FOREGROUND_REMOVE); foreground = false; }
-                stopSelf();
+                finishNotifications(null);
             }
         }
+    }
+    private NotificationBoundary.Publication publication(final String text,final boolean ongoing) {
+        return new NotificationBoundary.Publication() {
+            @Override public boolean visible() { return !destroyed && notificationsVisible(RecordingService.this); }
+            @Override public void publish() { notifications.notify(ongoing ? NOTIFICATION : RESULT_NOTIFICATION,notification(text,ongoing)); }
+        };
+    }
+    private void finishNotifications(String text) {
+        NotificationBoundary.finish(new Runnable() { @Override public void run() {
+            // A thrown stopForeground is not proof of notification removal. Still attempt stopSelf.
+            if (foreground) { stopForeground(STOP_FOREGROUND_REMOVE); foreground = false; }
+        } },text == null ? null : publication(text,false),new Runnable() { @Override public void run() { stopSelf(); } });
     }
     /** Small platform attempt adapter; native capture ownership remains inside CaptureEngine. */
     private final class AndroidAttempt implements RecoverySession.Attempt {

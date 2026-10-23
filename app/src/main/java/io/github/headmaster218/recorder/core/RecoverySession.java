@@ -41,7 +41,7 @@ public final class RecoverySession {
     private long nextEpoch;
     private int ordinal;
     private boolean resumed, blocked, journalFailed, userPaused, historicalUncertainty, cleanPauseEligible;
-    private boolean started, destroyed, terminalNotified;
+    private boolean started, destroyed, terminalNotified, notificationAuthorityLost;
     private String status = "Starting visible microphone service";
     private Runnable timer;
     private Write writing;
@@ -54,7 +54,17 @@ public final class RecoverySession {
         if (captureId==null || captureId.isEmpty() || epoch<0 || host==null || engines==null || journal==null) throw new IllegalArgumentException();
         this.captureId=captureId;nextEpoch=epoch;this.resumed=resumed;this.host=host;this.engines=engines;this.journal=journal;
     }
-    private boolean authority() { return !destroyed && host.authorized(); }
+    private boolean authority() {
+        if (destroyed || notificationAuthorityLost) return false;
+        try { return host.authorized(); }
+        catch (RuntimeException failure) {
+            // Preserve pre-admission failure/abort semantics. Once admitted, an
+            // unavailable authority query must cancel through the normal evidence
+            // and ownership gates, never escape a main-lane callback or grant a retry.
+            if (!started) throw failure;
+            return false;
+        }
+    }
     private long now() { return host.nowMillis(); }
     public InterruptionRecovery.Snapshot snapshot() { return policy.snapshot(); }
     /** Caller must already hold the process admission slot and have an authorized visible microphone FGS. */
@@ -70,6 +80,12 @@ public final class RecoverySession {
     }
     public void pause() { cancel(true); }
     public void stop() { cancel(false); }
+    /** Main-lane notification failure: revoke this session, without inventing cleanup evidence. */
+    public void authorityUnavailable() {
+        if (!started || destroyed || terminalNotified || notificationAuthorityLost) return;
+        notificationAuthorityLost=true;userPaused=false;
+        if(policy.snapshot().lastEnd!=InterruptionRecovery.End.AUTHORITY_LOST)loseAuthority();
+    }
     private void cancel(boolean pause) {
         if (!started || terminalNotified) return;
         userPaused=pause;if(pause)policy.pause(now());else policy.stop(now());cancelTimer();
@@ -130,11 +146,11 @@ public final class RecoverySession {
         }
         if(!RecoveryGate.storageClosed(result)){blocked=true;status="Storage closure is unconfirmed; files retained and restart blocked. "+status;}
         if(blocked || epoch==Long.MAX_VALUE){policy.stop(now());if(epoch==Long.MAX_VALUE){userPaused=false;status="Capture epoch exhausted; explicit Start must create a new capture. "+status;}}
-        if(!authority())policy.authorityLost(now());
+        if(!authority()){userPaused=false;policy.authorityLost(now());}
         userPaused=userPaused && paused;show();pump();
     }
     private void cancelTimer(){if(timer!=null){host.remove(timer);timer=null;}}
-    private void loseAuthority(){policy.authorityLost(now());cancelTimer();if(active!=null)active.stop(Stop.INTERRUPTED);
+    private void loseAuthority(){userPaused=false;policy.authorityLost(now());cancelTimer();if(active!=null)active.stop(Stop.INTERRUPTED);
         status="Recovery stopped: foreground microphone authority or notification permission is unavailable.";show();pump();}
     private void pump() {
         if(terminalNotified || writing!=null)return;

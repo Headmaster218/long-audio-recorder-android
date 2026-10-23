@@ -11,6 +11,7 @@ public final class RecoverySessionTest {
     private static final class Harness implements RecoverySession.Host, RecoverySession.Engines, RecoverySession.Journal {
         long now;
         boolean authority = true, failStart, failCreate, invalidIdentity, failJournal, failAuthority;
+        int authorityCalls, failAuthorityAt;
         int finished;
         boolean released, cleanPause;
         final ArrayDeque<Runnable> queue = new ArrayDeque<Runnable>();
@@ -20,7 +21,11 @@ public final class RecoverySessionTest {
         final RecoverySession session = new RecoverySession("capture",0,false,this,this,this);
         String status;
         @Override public long nowMillis() { return now; }
-        @Override public boolean authorized() { if(failAuthority)throw new SecurityException("authority lookup failed");return authority; }
+        @Override public boolean authorized() {
+            authorityCalls++;
+            if(failAuthority || authorityCalls==failAuthorityAt)throw new SecurityException("authority lookup failed");
+            return authority;
+        }
         @Override public void post(Runnable work) { queue.add(work); }
         @Override public void postDelayed(Runnable work,long delay) { check(delay >= 0); timers.add(work); }
         @Override public void remove(Runnable work) { timers.remove(work); }
@@ -161,8 +166,116 @@ public final class RecoverySessionTest {
         h.latest().finish(null,CaptureEvidence.Release.RETURNED,true,true,false,false);h.acknowledgeAll();check(h.released);
         h=new Harness();h.failStart=true;check(h.session.start(true));h.acknowledgeAll();check(h.latest().starts==0 && h.released && h.timers.isEmpty());
     }
+    private static void authorityFailureAtFirstPcm() {
+        Harness h=new Harness();check(h.session.start(true));Attempt attempt=h.latest();
+        h.failAuthority=true;attempt.first();h.drain();
+        check(attempt.stops==1 && attempt.lastStop==RecoverySession.Stop.INTERRUPTED);
+        check(h.session.snapshot().state!=InterruptionRecovery.State.RUNNING);
+        check(h.finished==0 && h.timers.isEmpty() && h.attempts.size()==1);
+        h.acknowledgeAll();check(h.finished==0); // A query error is not release evidence.
+        attempt.finish(null,CaptureEvidence.Release.RETURNED,true,true,false,false);h.acknowledgeAll();
+        check(h.finished==1 && h.released && !h.cleanPause && h.attempts.size()==1 && h.timers.isEmpty());
+        attempt.first();h.drain();check(h.finished==1 && h.attempts.size()==1);
+    }
+    private static void authorityFailureAtCompletion() {
+        Harness h=new Harness();check(h.session.start(true));Attempt attempt=h.latest();
+        h.failAuthority=true;attempt.interrupted();h.drain();
+        check(h.finished==0 && h.timers.isEmpty() && h.attempts.size()==1);
+        h.acknowledgeAll();
+        check(h.finished==1 && h.released && !h.cleanPause && h.timers.isEmpty() && h.attempts.size()==1);
+        attempt.interrupted();h.drain();check(h.finished==1);
+    }
+    private static void authorityFailureAtRetryTimer() {
+        Harness h=waiting();Runnable stale=h.timers.get(0);h.failAuthority=true;h.fire();
+        check(h.attempts.size()==1 && h.timers.isEmpty() && h.finished==0);
+        h.acknowledgeAll();
+        check(h.finished==1 && h.released && !h.cleanPause && h.attempts.size()==1 && h.timers.isEmpty());
+        stale.run();h.drain();check(h.finished==1 && h.attempts.size()==1);
+    }
+    private static void authorityFailureBeforeCreate() {
+        Harness h=new Harness();h.failAuthorityAt=2;check(h.session.start(true));
+        check(h.authorityCalls==2 && h.attempts.isEmpty() && h.timers.isEmpty());
+        check(!h.session.abortBeforeStart());h.acknowledgeAll();
+        check(h.finished==1 && h.released && !h.cleanPause && h.attempts.isEmpty());
+        check(!h.session.start(true)); // Recovery of the query itself grants no restart authority.
+    }
+    private static void authorityFailureCase(String name) {
+        if ("authority-first-pcm".equals(name)) authorityFailureAtFirstPcm();
+        else if ("authority-completion".equals(name)) authorityFailureAtCompletion();
+        else if ("authority-retry-timer".equals(name)) authorityFailureAtRetryTimer();
+        else if ("authority-before-create".equals(name)) authorityFailureBeforeCreate();
+        else if ("authority-after-journal".equals(name)) authorityFailureAfterJournal();
+        else if ("authority-retry-launch".equals(name)) authorityFailureAtRetryLaunch();
+        else if ("authority-uncertain-cleanup".equals(name)) authorityFailureWithUncertainCleanup();
+        else if ("authority-restored".equals(name)) restoredAuthorityDoesNotRestart();
+        else if ("notification-authority-loss".equals(name)) notificationAuthorityLoss();
+        else throw new IllegalArgumentException("Unknown finite case: "+name);
+    }
+    private static boolean authorityLostRecorded(Harness h) {
+        for(Write w:h.writes)if(w.record.contains("\nend=AUTHORITY_LOST\n"))return true;
+        return false;
+    }
+    private static void authorityFailureAfterJournal() {
+        Harness h=new Harness();check(h.session.start(true));h.latest().interrupted();h.drain();
+        check(h.writes.size()==1 && h.timers.isEmpty());h.failAuthority=true;h.acknowledgeAll();
+        check(h.finished==1 && h.released && h.attempts.size()==1 && h.timers.isEmpty());
+        check(authorityLostRecorded(h));
+    }
+    private static void authorityFailureAtRetryLaunch() {
+        Harness h=waiting();h.failAuthorityAt=h.authorityCalls+2;h.fire();
+        check(h.authorityCalls==h.failAuthorityAt && h.attempts.size()==1 && h.timers.isEmpty());
+        h.acknowledgeAll();check(h.finished==1 && h.released && !h.cleanPause && authorityLostRecorded(h));
+    }
+    private static void authorityFailureWithUncertainCleanup() {
+        for(int uncertainty=0;uncertainty<3;uncertainty++) {
+            Harness h=new Harness();check(h.session.start(true));h.failAuthority=true;
+            h.failJournal=uncertainty==2;
+            h.latest().finish(CaptureEvidence.Failure.ROUTE_UNAVAILABLE,
+                uncertainty==0?CaptureEvidence.Release.UNCONFIRMED:CaptureEvidence.Release.RETURNED,
+                true,uncertainty!=1,false,false);
+            h.acknowledgeAll();
+            check(h.finished==1 && !h.released && !h.cleanPause && h.attempts.size()==1 && h.timers.isEmpty());
+        }
+    }
+    private static void restoredAuthorityDoesNotRestart() {
+        Harness h=new Harness();check(h.session.start(true));Attempt attempt=h.latest();
+        h.failAuthority=true;attempt.first();h.drain();check(attempt.lastStop==RecoverySession.Stop.INTERRUPTED);
+        h.failAuthority=false;h.authority=true;attempt.first();h.drain();
+        h.acknowledgeAll();check(h.finished==0 && h.attempts.size()==1 && h.timers.isEmpty());
+        attempt.finish(null,CaptureEvidence.Release.RETURNED,true,true,false,false);h.acknowledgeAll();
+        check(h.finished==1 && h.released && !h.cleanPause && h.attempts.size()==1 && h.timers.isEmpty());
+        check(authorityLostRecorded(h) && !h.session.start(true));
+    }
+    private static void notificationAuthorityLoss() {
+        Harness h=new Harness();h.session.authorityUnavailable();check(h.session.start(true));
+        Attempt attempt=h.latest();h.session.authorityUnavailable();h.session.authorityUnavailable();
+        check(attempt.stops==1 && attempt.lastStop==RecoverySession.Stop.INTERRUPTED);
+        h.acknowledgeAll();check(h.finished==0 && h.timers.isEmpty());
+        attempt.finish(null,CaptureEvidence.Release.RETURNED,true,true,false,false);h.acknowledgeAll();
+        check(h.finished==1 && h.released && !h.cleanPause && authorityLostRecorded(h));
+        h.session.authorityUnavailable();check(h.finished==1 && attempt.stops==1);
+        h=new Harness();check(h.session.start(true));attempt=h.latest();h.session.pause();
+        h.session.authorityUnavailable();attempt.finish(null,CaptureEvidence.Release.RETURNED,true,true,false,true);h.acknowledgeAll();
+        check(h.finished==1 && h.released && !h.cleanPause);
+        // A query failure already revoked authority; the queued notification callback is idempotent.
+        h=new Harness();check(h.session.start(true));attempt=h.latest();h.failAuthority=true;attempt.first();h.drain();
+        int stops=attempt.stops;h.session.authorityUnavailable();h.session.authorityUnavailable();check(attempt.stops==stops);
+        attempt.finish(null,CaptureEvidence.Release.UNCONFIRMED,true,true,false,false);h.acknowledgeAll();
+        check(h.finished==1 && !h.released && !h.cleanPause && h.attempts.size()==1);
+        h=new Harness();check(h.session.start(true));h.session.pause();h.failAuthority=true;
+        h.latest().finish(null,CaptureEvidence.Release.RETURNED,true,true,false,true);h.acknowledgeAll();
+        check(h.finished==1 && h.released && !h.cleanPause);
+    }
     public static void main(String[] args) {
+        if (args.length>0) {
+            for (String name:args) authorityFailureCase(name);
+            System.out.println("PASS " + assertions + " selected authority-failure assertions; deterministic host ports, no Android runtime");
+            return;
+        }
         preAdmissionAbort();optOutAndCleanPause();cancellationOrders();journalCallbacks();timerAndDuplicateFinal();dispatchFailuresAndDestroyOrders();ownershipAndStorage();staleEngineAndAuthority();
+        authorityFailureAtFirstPcm();authorityFailureAtCompletion();authorityFailureAtRetryTimer();authorityFailureBeforeCreate();
+        authorityFailureAfterJournal();authorityFailureAtRetryLaunch();authorityFailureWithUncertainCleanup();restoredAuthorityDoesNotRestart();
+        notificationAuthorityLoss();
         System.out.println("PASS " + assertions + " production recovery-session ordering assertions; deterministic host ports, no Android runtime");
     }
 }

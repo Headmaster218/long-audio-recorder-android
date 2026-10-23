@@ -8,4 +8,4 @@ printf '%s\n' app/src/test/java/io/github/headmaster218/recorder/core/RecoverySe
 java -Xmx64m -XX:MaxMetaspaceSize=48m -XX:ReservedCodeCacheSize=16m -XX:+UseSerialGC -XX:ActiveProcessorCount=1 -Xss256k \
   -m jdk.compiler/com.sun.tools.javac.Main -source 8 -target 8 -Xlint:all,-options -Werror -d "$out" @"$out/sources.txt"
 java -Xmx32m -XX:MaxMetaspaceSize=32m -XX:ReservedCodeCacheSize=8m -XX:+UseSerialGC -XX:ActiveProcessorCount=1 -Xss256k \
-  -cp "$out" io.github.headmaster218.recorder.core.RecoverySessionTest
+  -cp "$out" io.github.headmaster218.recorder.core.RecoverySessionTest "$@"
