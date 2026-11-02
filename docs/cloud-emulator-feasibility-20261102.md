@@ -1,0 +1,13 @@
+# Cloud emulator feasibility — November 2, 2026
+
+Read-only inventory, not a device run. The selected cloud snapshot again lacks the previously restored Android worktree/SDK. No SDK rebuild was repeated for unchanged production source.
+
+Observed: no adb/emulator/avdmanager/qemu-system-x86_64 on PATH; no running matching process, known AVD, android.jar in checked workspace/shared/opt/tmp paths, `/dev/kvm`, `/dev/bus/usb` or `/dev/snd`. Exposed x86_64 CPU flags contain neither vmx nor svm. `/proc/meminfo` reported approximately 8.65 GiB available and disk about 58 GiB free; cgroup memory limits were not exposed, so these are observations, not guaranteed isolated budgets. No connected user desktop/device was accessed, and no adb server was started.
+
+The prior minimal official SDK contained compile/package tools only, not emulator, Platform Tools or a system image. Having accepted its SDK license does not mean those missing components are installed or that new image-specific terms can be silently accepted. No emulator, image or broad SDK download, virtualization reconfiguration, device-node creation, signing, installation or device attachment was attempted here.
+
+**Decision:** no runnable emulator smoke is currently available. RAM/disk alone are insufficient evidence; usable Linux KVM is absent. Software emulation is not categorically impossible, but version/image support, boot time, RAM and sound injection are unverified; downloading a large image to discover this is not justified by the current inventory. Do not propose a guessed `-no-accel` workaround: current official command documentation lists that option as deprecated/version-dependent.
+
+A future authorized disposable cloud host with usable KVM, compatible official emulator/image and an explicitly selected test target could run framework UI/permission/foreground-service/process-stop smoke, using separately authorized signed installation. It could test Android callbacks and policy flows missing from host-port tests. Synthetic audio in an emulator would still not validate physical microphone capture/release, actual wired/USB routing, OEM screen-off/power behavior, thermal/battery endurance or real filesystem power-loss durability. Those require the intended hardware and consented input; see [the executable device checklist](device-acceptance-20261102.md).
+
+Primary references checked November 2: [Linux VM acceleration and KVM](https://developer.android.com/studio/run/emulator-acceleration), [emulator command-line options](https://developer.android.com/studio/run/emulator-commandline). This is an environment assessment, not an emulator/phone acceptance result.
