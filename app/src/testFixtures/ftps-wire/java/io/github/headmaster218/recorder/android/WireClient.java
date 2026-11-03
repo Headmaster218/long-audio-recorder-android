@@ -54,7 +54,7 @@ public final class WireClient {
     }
 
     private static void execute(String[] args) throws Exception {
-        require(args.length == 3, "Expected scenario, workdir, port");
+        require(args.length == 3 || args.length == 4, "Expected scenario, workdir, port, optional synthetic source spool");
         String scenario = args[0];
         require(Arrays.asList("success", "untrusted_control", "wrong_host_control", "wrong_data_cert",
             "corrupt_readback", "truncated_readback", "partial_disconnect", "lost_final_reply",
@@ -65,15 +65,29 @@ public final class WireClient {
         if (!Files.exists(workdir, LinkOption.NOFOLLOW_LINKS)) Files.createDirectory(workdir);
         require(Files.isDirectory(workdir, LinkOption.NOFOLLOW_LINKS)
             && workdir.equals(workdir.toRealPath()), "Workdir must have a canonical non-symlink path");
-        Path root = workdir.resolve("spool");
-        require(!Files.exists(root, LinkOption.NOFOLLOW_LINKS), "Each case needs a fresh spool");
-        CommittedSegments.Entry entry = createSource(root);
+        boolean supplied = args.length == 4;
+        Path root = supplied ? Paths.get(args[3]).toAbsolutePath().normalize() : workdir.resolve("spool");
+        CommittedSegments.Entry entry;
+        if (supplied) {
+            require(Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS) && root.equals(root.toRealPath()), "Canonical source required");
+            CommittedSegments.Page page = new CommittedSegments(root).page(null);
+            require(page.entries.size() == 1 && !page.hasMore && page.rejected == 0, "One synthetic source required");
+            entry = page.entries.get(0);
+            require(entry.metadata.intent.epoch.captureId.equals("synthetic-silence-11s-v2")
+                && entry.metadata.frameCount == 176000 && entry.metadata.wavBytes == 352044
+                && hash(entry.metadata.encode()).equals("84022fe2042b3b6ce6602413a85732099a7567612c6d175ef7b275b66b5e222d")
+                && entry.metadata.wavSha256.equals("1a092b23d9dfe64d53943d18262c0a49eaf32c5ab5f2b016cd8edd16ec9440dd"),
+                "Only the exact synthetic 11-second silence fixture is allowed");
+        } else {
+            require(!Files.exists(root, LinkOption.NOFOLLOW_LINKS), "Each case needs a fresh spool");
+            entry = createSource(root);
+        }
         CommittedSegments catalog = new CommittedSegments(root);
         entry = catalog.load(entry.id);
         catalog.verify(entry, NEVER_CANCEL);
-        String before = sourceHash(catalog, entry);
+        String before = sourceHash(catalog, entry, supplied ? 512 * 1024 : 128 * 1024);
         require(before.equals(entry.metadata.wavSha256), "Finalized source hash mismatch");
-        require(entry.metadata.wavBytes <= 128 * 1024, "Synthetic WAV exceeds fixture bound");
+        require(entry.metadata.wavBytes <= (supplied ? 512 : 128) * 1024, "Synthetic WAV exceeds fixture bound");
         String attempt = FtpsTransfer.newAttemptName(entry.id, before, REVISION);
         persistAttempt(workdir, attempt);
         FtpsTransfer.Profile profile = new FtpsTransfer.Profile("127.0.0.1", port, "synthetic", "/fixture");
@@ -100,7 +114,7 @@ public final class WireClient {
         }
         if (result != null) verifyResult(result, entry, attempt);
         catalog.verify(entry, NEVER_CANCEL);
-        String after = sourceHash(catalog, entry);
+        String after = sourceHash(catalog, entry, supplied ? 512 * 1024 : 128 * 1024);
         require(before.equals(after), "Local source changed");
         require(Files.isDirectory(root.resolve(entry.id), LinkOption.NOFOLLOW_LINKS), "Ready source was removed");
         int sockets = 0, connects = 0, registrations = 0, unregistrations = 0;
@@ -237,12 +251,12 @@ public final class WireClient {
             "Production Result hash/size mismatch");
     }
 
-    private static String sourceHash(CommittedSegments catalog, CommittedSegments.Entry entry) throws IOException {
+    private static String sourceHash(CommittedSegments catalog, CommittedSegments.Entry entry, long maximumBytes) throws IOException {
         MessageDigest digest = sha256(); byte[] block = new byte[8192]; long size = 0;
         try (InputStream source = catalog.open(entry)) {
             int count;
             while ((count = source.read(block)) != -1) {
-                require(count > 0 && size + count <= 128 * 1024, "Source exceeds fixture bound");
+                require(count > 0 && size + count <= maximumBytes, "Source exceeds fixture bound");
                 digest.update(block, 0, count); size += count;
             }
         }

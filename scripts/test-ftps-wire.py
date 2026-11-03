@@ -2,15 +2,26 @@
 """Explicit bounded real-wire acceptance. Requires reviewed fixture and separately prepared pinned dependencies."""
 import argparse,datetime,hashlib,json,os,pathlib,shutil,signal,socket,subprocess,sys,time
 root=pathlib.Path(__file__).resolve().parents[1]
-p=argparse.ArgumentParser();p.add_argument('--production',required=True);p.add_argument('--android',required=True);p.add_argument('--execute-reviewed-fixture',action='store_true')
+p=argparse.ArgumentParser();p.add_argument('--production');p.add_argument('--android');p.add_argument('--execute-reviewed-fixture',action='store_true')
+p.add_argument('--host-source',action='store_true',help='Compile actual production FTPS sources with explicit host Android API fixtures; not SDK qualification')
+p.add_argument('--source-spool',type=pathlib.Path,help='Existing exact synthetic 11-second silence spool; four real-wire scenarios only')
 a=p.parse_args()
 if not a.execute_reviewed_fixture:raise SystemExit('No execution without --execute-reviewed-fixture')
 if sys.platform!='linux':raise SystemExit('This bounded process-tree runner is Linux-only')
-if os.sched_getaffinity(0)!={3}:raise SystemExit('Run with taskset -c3 nice -n19')
+if os.sched_getaffinity(0)!={3}:raise SystemExit('Run with taskset -c 3 nice -n 19')
 if os.getpriority(os.PRIO_PROCESS,0)<19:raise SystemExit('Run at nice19')
-production=pathlib.Path(a.production).resolve();android=pathlib.Path(a.android).resolve()
+if a.host_source:
+ if a.production or a.android or not a.source_spool:raise SystemExit('Host source mode requires --source-spool and no SDK/classpath inputs')
+ production=android=None
+elif not a.production or not a.android or a.source_spool:
+ raise SystemExit('Original SDK mode requires --production and --android; source-spool requires --host-source')
+else:production=pathlib.Path(a.production).resolve();android=pathlib.Path(a.android).resolve()
+source_spool=None
+if a.source_spool:
+ source_spool=a.source_spool.absolute()
+ if not source_spool.is_dir() or source_spool!=source_spool.resolve():raise SystemExit('Source spool must be an existing canonical directory')
 fixture=root/'app/src/testFixtures/ftps-wire';deps=root/'app/build/ftps-wire-dependencies/installed'
-if not deps.is_dir() or not android.is_file():raise SystemExit('Existing dependencies and official SDK are required')
+if not deps.is_dir() or (not a.host_source and not android.is_file()):raise SystemExit('Existing dependencies and, for SDK mode, official SDK are required')
 sys.path.insert(0,str(deps))
 import importlib.metadata
 manifest=json.loads((fixture/'dependencies.json').read_text())
@@ -83,10 +94,15 @@ try:
  trust=keys/'trust.p12'
  invoke(['keytool','-importcert','-noprompt','-storetype','PKCS12','-keystore',trust,'-storepass','synthetic','-alias','fixture-ca','-file',keys/'ca.pem'],work/'trust-setup.log')
  classes=work/'classes';classes.mkdir();sources=sorted((fixture/'java').rglob('*.java'))
+ if a.host_source:
+  sources+=sorted((root/'app/src/main/java/io/github/headmaster218/recorder/core').glob('*.java'))
+  sources.append(root/'app/src/main/java/io/github/headmaster218/recorder/android/FtpsNetwork.java')
+ compile_cp=[] if a.host_source else ['-cp',str(production)+':'+str(android)]
+ runtime_cp=str(classes) if a.host_source else str(classes)+':'+str(production)+':'+str(android)
  java=['java','-Xmx64m','-XX:MaxMetaspaceSize=48m','-XX:ReservedCodeCacheSize=8m','-XX:+UseSerialGC','-XX:ActiveProcessorCount=1','-Xss256k']
  source_list=work/'sources.txt';source_list.write_text('\n'.join(str(f)for f in sources)+'\n')
- invoke(java+['-m','jdk.compiler/com.sun.tools.javac.Main','-source','8','-target','8','-Xlint:all,-options','-Werror','-cp',str(production)+':'+str(android),'-d',classes,'@'+str(source_list)],work/'compile.log',60)
- scenarios=['success','untrusted_control','wrong_host_control','wrong_data_cert','corrupt_readback','truncated_readback','partial_disconnect','lost_final_reply','stalled_handshake']
+ invoke(java+['-m','jdk.compiler/com.sun.tools.javac.Main','-source','8','-target','8','-Xlint:all,-options','-Werror',*compile_cp,'-d',classes,'@'+str(source_list)],work/'compile.log',60)
+ scenarios=['success','untrusted_control','wrong_host_control','wrong_data_cert'] if a.host_source else ['success','untrusted_control','wrong_host_control','wrong_data_cert','corrupt_readback','truncated_readback','partial_disconnect','lost_final_reply','stalled_handshake']
  for scenario in scenarios:
   case=work/scenario;case.mkdir();case_started=time.monotonic()
   certname='untrusted'if scenario=='untrusted_control'else'wrong'if scenario=='wrong_host_control'else'positive'
@@ -97,12 +113,12 @@ try:
    if server.poll()is not None or time.monotonic()-case_started>5:raise RuntimeError('Server did not become ready')
    time.sleep(.025)
   address=json.loads((case/'ready.json').read_text());assert address['host']=='127.0.0.1'
-  client=spawn(java+['-Djavax.net.ssl.trustStore='+str(trust),'-Djavax.net.ssl.trustStorePassword=synthetic','-Djavax.net.ssl.trustStoreType=PKCS12','-cp',str(classes)+':'+str(production)+':'+str(android),'io.github.headmaster218.recorder.android.WireClient',scenario,case,str(address['port'])],case/'client.log')
+  client=spawn(java+['-Djavax.net.ssl.trustStore='+str(trust),'-Djavax.net.ssl.trustStorePassword=synthetic','-Djavax.net.ssl.trustStoreType=PKCS12','-cp',runtime_cp,'io.github.headmaster218.recorder.android.WireClient',scenario,case,str(address['port'])]+([source_spool] if source_spool else []),case/'client.log')
   finish(client,25);(case/'stop').touch();finish(server,3)
   if time.monotonic()-case_started>30:raise TimeoutError('Thirty-second case bound')
   receipt=json.loads((case/'client.log').read_text().splitlines()[-1]);facts=json.loads((case/'server-result.json').read_text())
   assert receipt['scenario']==scenario and receipt['local_unchanged'] and not receipt['cleanup_invoked']
-  assert receipt['source_hash_before']==receipt['source_hash_after'] and receipt['source_bytes']<=128*1024
+  assert receipt['source_hash_before']==receipt['source_hash_after'] and receipt['source_bytes']<=(512*1024 if a.host_source else 128*1024)
   assert receipt['all_raw_sockets_closed'] and receipt['raw_connections_made']>0
   assert receipt['callback_registrations']==receipt['callback_unregistrations']
   expected='verified'if scenario=='success'else'reconciled'if scenario=='lost_final_reply'else'expected_failure'
@@ -131,7 +147,8 @@ try:
   results.append({'scenario':scenario,'seconds':round(time.monotonic()-case_started,3),'client':receipt,'server':facts})
   if sum(r['server']['data_bytes']for r in results)>8*1024**2:raise RuntimeError('Aggregate application wire-byte bound')
   print('PASS real-wire case '+scenario,flush=True)
- report={'base_commit':'8edff98955655350e5af6b2d8b4ccdf4cb89fd9b','scenarios':results,'certificate_sha256':fingerprints,'peak_process_tree_rss':peak,'seconds':round(time.monotonic()-started,3),'dependencies':manifest,'limitations':'Real JVM sockets/TLS and production FTPS classes; Android routing/trust provider/lifecycle and automatic cleanup coordinator are not executed.'}
+ report={'host_api_fixtures':a.host_source,'source_spool_supplied':source_spool is not None,'base_commit':'8edff98955655350e5af6b2d8b4ccdf4cb89fd9b','scenarios':results,'certificate_sha256':fingerprints,'peak_process_tree_rss':peak,'seconds':round(time.monotonic()-started,3),'dependencies':manifest,'limitations':'Real JVM sockets/TLS and production FTPS classes; Android routing/trust provider/lifecycle and automatic cleanup coordinator are not executed.'}
+ report['compiled_source_sha256']={str(f.relative_to(root)):hashlib.sha256(f.read_bytes()).hexdigest()for f in sources}
  (work/'report.json').write_text(json.dumps(report,indent=2)+'\n')
  print('REPORT '+str(work/'report.json'))
 finally:
