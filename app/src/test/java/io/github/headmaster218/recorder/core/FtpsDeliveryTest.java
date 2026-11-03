@@ -20,20 +20,30 @@ public final class FtpsDeliveryTest {
     }
     private static String hash(byte[] bytes) { return PcmSegmentWriter.hex(PcmSegmentWriter.sha256().digest(bytes)); }
     private static void fixture(Path root, int version, boolean unicode, int channels) throws Exception {
+        fixture(root,version,unicode,channels,CaptureAnchors.TimestampStatus.AVAILABLE,3);
+    }
+    private static void fixture(Path root, int version, boolean unicode, int channels,
+                                CaptureAnchors.TimestampStatus status, int frames) throws Exception {
         Path spool = Files.createDirectory(root.resolve("spool"));
         String capture = unicode ? "synthetic-\u4e2d\u6587-\ud83c\udfb5" : "synthetic-delivery-v" + version;
         CaptureTimeline.Epoch epoch = new CaptureTimeline.Epoch(capture,"run",0,
             new PcmFormat(channels == 1 ? 16000 : 48000,channels),"phone","phone",CaptureTimeline.Gap.START);
         try (DirectorySpool store = new DirectorySpool(spool,new CachePolicy(1000000,0),new DirectorySpool.NioProtocol(),(op,p)->{})) {
             PcmSegmentWriter writer = new PcmSegmentWriter(store,epoch,4,0,p->{});
-            // Three frames yield a short STOP tail, not a fabricated full segment.
-            byte[] pcm = new byte[3 * channels * 2]; for (int i=0;i<pcm.length;i++) pcm[i]=(byte)(i*19);
+            // Small deterministic chunks exercise full rotations and short STOP tails.
+            byte[] pcm = new byte[frames * channels * 2]; for (int i=0;i<pcm.length;i++) pcm[i]=(byte)(i*19);
             CaptureAnchors.Read observation = version == 1 ? null : new CaptureAnchors.Read(
-                "00000000-0000-0000-0000-000000000001","run",0,0,3*channels,1,2,3,4,5,6,0,0,
-                new CaptureAnchors.Timestamp(CaptureAnchors.TimestampStatus.AVAILABLE,0,4294967301L,1,1,2),CaptureAnchors.RUN_START);
+                "00000000-0000-0000-0000-000000000001","run",0,0,frames*channels,1,2,3,4,5,6,0,0,
+                status == CaptureAnchors.TimestampStatus.NOT_POLLED ? CaptureAnchors.Timestamp.notPolled()
+                    : new CaptureAnchors.Timestamp(status,status == CaptureAnchors.TimestampStatus.UNAVAILABLE ? -3 : 0,
+                        status == CaptureAnchors.TimestampStatus.AVAILABLE ? 4294967301L : 0,
+                        status == CaptureAnchors.TimestampStatus.AVAILABLE ? 1 : 0,1,2),CaptureAnchors.RUN_START);
             writer.append(pcm,0,pcm.length,observation); writer.stop();
         }
-        CommittedSegments.Entry entry = new CommittedSegments(spool).page(null).entries.get(0);
+        CommittedSegments.Page page = new CommittedSegments(spool).page(null);
+        yes(page.rejected == 0); yes(page.entries.size() == (frames + 3) / 4);
+        for (CommittedSegments.Entry entry : page.entries) {
+        if (version == 2) yes(SegmentMetadata.decode(entry.metadata.encode()).captureAnchors.firstRead.timestamp.status == status);
         String revision = "synthetic-profile-1";
         String binding = hash((entry.id+"\n"+entry.metadata.wavSha256+"\n"+revision).getBytes(StandardCharsets.UTF_8));
         String attempt = "r-"+binding+"-00000000000000000000000000000001";
@@ -48,8 +58,11 @@ public final class FtpsDeliveryTest {
             +entry.metadata.wavSha256+"\n"+legacy.length+"\n"+hash(legacy)+"\n").getBytes(StandardCharsets.US_ASCII);
         yes(Arrays.equals(marker,delivery.markerBytes()));
         yes(hash(legacy).equals(delivery.metadataSha256)); yes(hash(marker).equals(delivery.markerSha256));
-        yes(entry.metadata.schemaVersion == version); yes(entry.metadata.frameCount == 3);
-        yes(entry.metadata.closeReason == CaptureTimeline.Close.STOP); yes(!entry.metadata.trustedPreviousSeam);
+        yes(entry.metadata.schemaVersion == version);
+        long remaining = frames - entry.metadata.intent.sequence * 4;
+        yes(entry.metadata.frameCount == Math.min(4,remaining));
+        yes(entry.metadata.closeReason == (remaining >= 4 ? CaptureTimeline.Close.ROTATION : CaptureTimeline.Close.STOP));
+        yes(entry.metadata.trustedPreviousSeam == (entry.metadata.intent.sequence > 0));
         byte[] copy = delivery.metadataBytes(); copy[0] ^= 1; yes(Arrays.equals(legacy,delivery.metadataBytes()));
         copy = delivery.markerBytes(); copy[0] ^= 1; yes(Arrays.equals(marker,delivery.markerBytes()));
         fails(()->FtpsDelivery.encode(entry,"bad\nrevision",attempt));
@@ -67,6 +80,7 @@ public final class FtpsDeliveryTest {
         Files.copy(spool.resolve(entry.id).resolve("audio.wav"),dest.resolve("audio.wav"));
         Files.write(dest.resolve("segment.v1.bin"),delivery.metadataBytes());
         Files.write(dest.resolve("delivery.v1.txt"),delivery.markerBytes());
+        }
     }
     public static void main(String[] args) throws Exception {
         if (args.length != 1) throw new IllegalArgumentException("One fresh output directory is required");
@@ -74,6 +88,10 @@ public final class FtpsDeliveryTest {
         fixture(Files.createDirectory(root.resolve("v1-mono")),1,false,1);
         fixture(Files.createDirectory(root.resolve("v2-mono")),2,false,1);
         fixture(Files.createDirectory(root.resolve("v2-unicode-stereo")),2,true,2);
-        System.out.println("PASS delivery codec: "+checks+" assertions; 3 synthetic producer fixtures; no device/network claims");
+        fixture(Files.createDirectory(root.resolve("v2-not-polled")),2,false,1,CaptureAnchors.TimestampStatus.NOT_POLLED,3);
+        fixture(Files.createDirectory(root.resolve("v2-unavailable")),2,false,1,CaptureAnchors.TimestampStatus.UNAVAILABLE,3);
+        fixture(Files.createDirectory(root.resolve("v2-query-exception")),2,false,1,CaptureAnchors.TimestampStatus.QUERY_EXCEPTION,3);
+        fixture(Files.createDirectory(root.resolve("v2-rotations")),2,false,2,CaptureAnchors.TimestampStatus.AVAILABLE,10);
+        System.out.println("PASS delivery codec: "+checks+" assertions; 9 synthetic producer deliveries; no device/network claims");
     }
 }

@@ -56,11 +56,13 @@ sh scripts/test-capture-anchors.sh
 ```
 
 The fixture command compiles the production core with Java 8 source/classfile
-targets and runs on host JVM 21. It creates three tiny deterministic synthetic
+targets and runs on host JVM 21. It creates nine tiny deterministic synthetic
 PCM fixtures through the production spool/writer and the exact production wire
 encoder: v1 16kHz mono, v2 16kHz mono, and v2 48kHz stereo with a Chinese/emoji
-capture ID. All are three-frame STOP tails; v2 includes an AVAILABLE timestamp
-with a frame position above 32 bits. No microphone, socket, account, SDK download,
+capture ID. The first three are three-frame STOP tails; additional cases cover NOT_POLLED,
+UNAVAILABLE and QUERY_EXCEPTION timestamp status, plus one read split across
+4+4+2-frame segments with ROTATION/STOP and trusted-previous-seam flags. AVAILABLE
+observations include a frame position above 32 bits. No microphone, socket, account, SDK download,
 key, or raw user recording is used. Generated audio stays in ignored build output
 or the explicit local output; only generator source is committed. Existing output
 directories are rejected, not overwritten.
@@ -73,14 +75,17 @@ ordering, readback, cancellation and failure handling.
 
 ## 2026-11-03 evidence and limits
 
-Fresh focused checks passed: delivery codec 54 assertions, scripted FTPS 868,
+Fresh focused checks passed: delivery codec 184 assertions, scripted FTPS 868,
 capture anchors 91, policy core 7,068, recovery-session 1,389 and admission 30.
 All 26 non-SDK shell suites passed on the assembled source, plus six host SQL
 suites (321 combined assertions) and 14 fixture-readiness assertions. Independent
 review found no blocking codec/refactor issues. These are host/model checks, not
-Android runtime execution. The backend's independent Python transport preflight accepted all three actual
-Java-produced fixtures. That preflight explicitly does not validate inner metadata
-semantics or establish strict import readiness.
+Android runtime execution. The backend's independent Python transport preflight initially accepted all three
+original Java-produced fixtures. Its subsequent opt-in semantic stage accepted all
+nine expanded deliveries, including Unicode, timestamp states and rotation seams
+(backend checkpoint `1ada8107db83d890eb053e824569a9895526a51f`). Default transport-only
+mode remains distinct from metadata semantic validation. Neither establishes
+immutable remote publication, sequence-wide continuity or strict import readiness.
 
 The historical `scripts/check-ftps-wiring.py` is tied to dev7 source ordering and
 version checks; on the unmodified six-overlay baseline it already fails because

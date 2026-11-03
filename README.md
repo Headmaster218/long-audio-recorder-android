@@ -2,6 +2,11 @@
 
 # Android recorder
 
+Build the integrated candidate from a **fresh assembled directory**, not this
+older root baseline: [reproducible source assembly](docs/source-assembly.md).
+Run `python3 scripts/assemble-source.py --ref HEAD --output ../recorder-integrated-new`.
+Only committed source is included; existing outputs and working-copy changes are preserved.
+
 Version: **0.1.0-dev13** (continuous historical-enrollment source candidate; unsigned build only, not device-qualified).
 
 Dev13 adds bounded historical catch-up during recording through the existing shared-owner lease. More than 500 unknown chunks are paged without clearing consent, subject to finite namespace/cache/queue limits. See [admission, cancellation and runtime limits](docs/continuous-enrollment.md).
@@ -135,7 +140,7 @@ The [nine-scenario loopback fixture](docs/ftps-loopback-integration.md) passed a
 ### Android/backend delivery compatibility
 
 The [producer-owned FTPS delivery contract](docs/ftps-delivery-contract.md) and
-`sh scripts/test-ftps-delivery.sh` generate three tiny synthetic deliveries from
+`sh scripts/test-ftps-delivery.sh` generate nine tiny synthetic deliveries from
 the exact production encoder for backend preflight checks. Existing wire bytes
 are preserved. This is transport compatibility evidence, not strict import,
 immutable-server publication, Android runtime or all-day recording acceptance.
