@@ -1,6 +1,6 @@
 # Reproducible integrated source assembly
 
-The development branch preserves an older root baseline and six ordered source
+The development branch preserves an older root baseline and seven ordered source
 checkpoints. Building only the root does not include all later Android fixes.
 Use the offline assembly helper from the Git checkout to create a fresh directory:
 
@@ -30,6 +30,10 @@ their `app`, `scripts` and `docs` content is applied in this exact order:
 4. recorder-reliability-recovery-20261031
 5. repeated-start-lifecycle-audit-20261101
 6. sdk-wire-readiness-20261101
+7. terminal-boundary-stop-20261103
+
+The current committed `source-overlays.json` selects all seven. For historical
+commits without this manifest, the helper retains the original six-overlay order.
 
 The helper refuses missing overlays, symlinks/submodules and unsafe paths rather
 than silently making an incomplete tree. Each source blob's Git SHA-1 is checked;
@@ -49,10 +53,11 @@ The helper does not download SDK components or sign/install an APK.
 
 ## Validation
 
-`python3 scripts/test-source-assembly.py` runs five offline synthetic Git tests:
+`python3 scripts/test-source-assembly.py` runs six offline synthetic Git tests:
 exact committed bytes despite dirty/untracked inputs, overlay precedence and
 receipt hashes, non-overwrite, tracked symlink rejection, missing overlay
-rejection, and unsafe path rejection (the first test covers several behaviors).
+rejection, and unsafe path rejection (the first test covers several behaviors), plus historical
+commits without the new overlay manifest.
 Generated fixtures remain local. Device lifecycle, actual recording, OEM survival,
 server durability and long-duration recording are not exercised by assembly.
 

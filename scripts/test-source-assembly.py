@@ -25,6 +25,7 @@ class AssemblyTest(unittest.TestCase):
         self.git('config', 'user.email', 'synthetic@example.invalid')
         (self.repo / 'README.md').write_text('base\n')
         (self.repo / '.gitignore').write_text('private-data\n')
+        (self.repo / assembly.OVERLAY_MANIFEST).write_text(json.dumps({'schema_version': 1, 'overlays': list(assembly.OVERLAYS)}))
         for index, overlay in enumerate(assembly.OVERLAYS):
             path = self.repo / 'checkpoints' / overlay / 'app' / 'policy.java'
             path.parent.mkdir(parents=True)
@@ -43,7 +44,7 @@ class AssemblyTest(unittest.TestCase):
         out = self.root / 'assembled'
         receipt = assembly.assemble(self.repo, self.commit, out)
         self.assertEqual((out / 'README.md').read_text(), 'base\n')
-        self.assertEqual((out / 'app/policy.java').read_text(), 'overlay-5')
+        self.assertEqual((out / 'app/policy.java').read_text(), 'overlay-' + str(len(assembly.OVERLAYS)-1))
         self.assertFalse((out / 'private-data').exists())
         self.assertFalse((out / 'untracked.txt').exists())
         self.assertFalse((out / '.git').exists())
@@ -81,6 +82,14 @@ class AssemblyTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             assembly.assemble(self.repo, 'HEAD', out)
         self.assertFalse(out.exists())
+
+    def test_historical_commit_without_manifest(self):
+        self.git('rm', '-qr', assembly.OVERLAY_MANIFEST, 'checkpoints/' + assembly.OVERLAYS[-1])
+        self.git('commit', '-qm', 'synthetic historical six-overlay source')
+        out = self.root / 'historical'
+        receipt = assembly.assemble(self.repo, 'HEAD', out)
+        self.assertEqual(receipt['overlays'], list(assembly.LEGACY_OVERLAYS))
+        self.assertEqual((out / 'app/policy.java').read_text(), 'overlay-5')
 
     def test_unsafe_paths_rejected(self):
         for path in ('../x', '/x', 'a/../x', '.git/config', 'a\\b', 'a//b'):

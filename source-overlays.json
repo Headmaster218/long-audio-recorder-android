@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "overlays": [
+    "upload-threshold-destroy-guard-20261025",
+    "input-routing-20261025",
+    "transfer-budget-recovery-20261030",
+    "recorder-reliability-recovery-20261031",
+    "repeated-start-lifecycle-audit-20261101",
+    "sdk-wire-readiness-20261101",
+    "terminal-boundary-stop-20261103"
+  ]
+}

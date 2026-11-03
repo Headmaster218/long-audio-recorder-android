@@ -15,6 +15,7 @@ public final class PcmSegmentWriter {
     private final Listener listener;
     private final CaptureTimeline timeline;
     private final long targetFrames;
+    private final boolean terminalAware;
     private Epoch epoch;
     private long sequence, epochFrames, segmentBytes;
     private SegmentStore.Staging staging;
@@ -23,11 +24,25 @@ public final class PcmSegmentWriter {
     private CaptureAnchors.Collector anchors;
     private Boolean observedMode;
     private CaptureAnchors.Read previousObservation;
+    /** Legacy eager publication is retained for existing callers and old fixture behavior. */
     public PcmSegmentWriter(SegmentStore store, Epoch epoch, long targetFrames, long nextSequence, Listener listener) {
+        this(store,epoch,targetFrames,nextSequence,listener,false);
+    }
+    /**
+     * Keep the last full segment staged until another nonempty append or explicit close.
+     * This lets exact-boundary Stop publish STOP without rewriting immutable metadata.
+     * A crash before close leaves recoverable uncertainty, never an inferred terminal record.
+     */
+    public static PcmSegmentWriter terminalAware(SegmentStore store, Epoch epoch, long targetFrames,
+                                                 long nextSequence, Listener listener) {
+        return new PcmSegmentWriter(store,epoch,targetFrames,nextSequence,listener,true);
+    }
+    private PcmSegmentWriter(SegmentStore store, Epoch epoch, long targetFrames, long nextSequence,
+                             Listener listener, boolean terminalAware) {
         if (store == null || listener == null) throw new IllegalArgumentException();
         new Intent(epoch, nextSequence, 0, targetFrames);
         this.store = store; this.listener = listener; this.epoch = epoch;
-        this.targetFrames = targetFrames; this.sequence = nextSequence;
+        this.targetFrames = targetFrames; this.sequence = nextSequence; this.terminalAware = terminalAware;
         this.timeline = new CaptureTimeline(epoch, targetFrames, nextSequence);
     }
     public void append(byte[] bytes, int offset, int length) throws IOException {
@@ -52,6 +67,9 @@ public final class PcmSegmentWriter {
         int consumed = 0;
         try {
             while (length > 0) {
+                // More accepted PCM, not an empty append, establishes that this is a rotation.
+                if (terminalAware && staging != null && segmentBytes == epoch.format.bytesForFrames(targetFrames))
+                    finish(Close.ROTATION);
                 if (staging == null) {
                     if (sequence == Long.MAX_VALUE) throw new IOException("sequence exhausted");
                     staging = store.open(new Intent(epoch, sequence, epochFrames, targetFrames));
@@ -71,7 +89,7 @@ public final class PcmSegmentWriter {
                 pcmHash.update(bytes, offset, count);
                 if (completedFrames > 0) timeline.appendFrames(completedFrames);
                 segmentBytes += count; epochFrames += completedFrames; offset += count; length -= count;
-                if (segmentBytes == targetBytes) finish(Close.ROTATION);
+                if (segmentBytes == targetBytes && !terminalAware) finish(Close.ROTATION);
             }
             if (observation != null) previousObservation = observation;
         } catch (IOException | RuntimeException e) { fail(e); throw e; }

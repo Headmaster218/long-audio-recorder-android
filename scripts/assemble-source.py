@@ -18,8 +18,11 @@ OVERLAYS = (
     'recorder-reliability-recovery-20261031',
     'repeated-start-lifecycle-audit-20261101',
     'sdk-wire-readiness-20261101',
+    'terminal-boundary-stop-20261103',
 )
+LEGACY_OVERLAYS = OVERLAYS[:-1]
 RECEIPT = 'ASSEMBLED_SOURCE.json'
+OVERLAY_MANIFEST = 'source-overlays.json'
 
 
 def git(repo, *args):
@@ -46,8 +49,17 @@ def assemble(repo, ref, destination):
         if kind != 'blob' or mode not in ('100644', '100755'):
             raise ValueError('Only regular tracked source files are supported: ' + name)
         records[name] = (mode, sha)
+    overlays = LEGACY_OVERLAYS
+    if OVERLAY_MANIFEST in records:
+        config_bytes = git(repo, 'cat-file', 'blob', records[OVERLAY_MANIFEST][1])
+        if len(config_bytes) > 4096:
+            raise ValueError('Oversized overlay manifest')
+        config = json.loads(config_bytes)
+        if config != {'schema_version': 1, 'overlays': list(OVERLAYS)}:
+            raise ValueError('Unsupported overlay manifest')
+        overlays = OVERLAYS
     selected = {name: name for name in records if not name.startswith('checkpoints/')}
-    for overlay in OVERLAYS:
+    for overlay in overlays:
         prefix = 'checkpoints/' + overlay + '/'
         candidates = {name[len(prefix):]: name for name in records
                       if name.startswith(prefix) and name[len(prefix):].split('/', 1)[0] in ('app', 'scripts', 'docs')}
@@ -70,7 +82,7 @@ def assemble(repo, ref, destination):
     # mkdir without exist_ok rejects existing files/directories and symlinks.
     destination = Path(destination)
     destination.mkdir()
-    receipt = {'schema_version': 1, 'source_commit': commit, 'overlays': list(OVERLAYS), 'files': []}
+    receipt = {'schema_version': 1, 'source_commit': commit, 'overlays': list(overlays), 'files': []}
     for target, (source, mode, sha, data) in content.items():
         output = destination / target
         output.parent.mkdir(parents=True, exist_ok=True)

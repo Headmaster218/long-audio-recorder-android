@@ -144,3 +144,11 @@ The [producer-owned FTPS delivery contract](docs/ftps-delivery-contract.md) and
 the exact production encoder for backend preflight checks. Existing wire bytes
 are preserved. This is transport compatibility evidence, not strict import,
 immutable-server publication, Android runtime or all-day recording acceptance.
+
+### Exact-boundary Stop
+
+The [terminal-aware writer](docs/terminal-boundary-stop.md) now records STOP when
+recording ends exactly on a segment boundary. Current CaptureEngine selects it;
+legacy eager callers and old metadata remain unchanged. One full segment waits
+for another read or explicit close before publication. Host tests are not device
+or all-day recording acceptance.
