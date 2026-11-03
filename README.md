@@ -131,3 +131,11 @@ no APK. See [FTPS limits and evidence](docs/ftps-transfer.md) before testing.
 ### Real FTPS/TLS loopback acceptance
 
 The [nine-scenario loopback fixture](docs/ftps-loopback-integration.md) passed against unchanged dev13 production FTPS classes, including strict certificate/hostname rejection, full readback and same-attempt recovery. This test-only checkpoint keeps app version dev13 and does not qualify Android device networking or all-day operation.
+
+### Android/backend delivery compatibility
+
+The [producer-owned FTPS delivery contract](docs/ftps-delivery-contract.md) and
+`sh scripts/test-ftps-delivery.sh` generate three tiny synthetic deliveries from
+the exact production encoder for backend preflight checks. Existing wire bytes
+are preserved. This is transport compatibility evidence, not strict import,
+immutable-server publication, Android runtime or all-day recording acceptance.

@@ -2,7 +2,6 @@ package io.github.headmaster218.recorder.core;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -76,13 +75,6 @@ public final class FtpsTransfer {
         if (value == null || !value.matches("r-[0-9a-f]{64}-[0-9a-f]{32}")) throw new IllegalArgumentException("Invalid owned attempt name");
     }
     private static String hash(byte[] bytes) { return PcmSegmentWriter.hex(PcmSegmentWriter.sha256().digest(bytes)); }
-    private static byte[] metadata(CommittedSegments.Entry entry, String profileRevision) throws IOException {
-        ByteArrayOutputStream b = new ByteArrayOutputStream(); DataOutputStream out = new DataOutputStream(b);
-        out.writeInt(0x52465431); out.writeUTF(revision(profileRevision)); out.writeUTF(entry.id);
-        byte[] local = entry.metadata.encode(); out.writeInt(local.length); out.write(local); out.flush();
-        if (b.size() > SegmentMetadata.MAX_BYTES + 512) throw new IOException("Transport metadata exceeds bound");
-        return b.toByteArray();
-    }
     private static void verifySource(final CommittedSegments catalog, final CommittedSegments.Entry entry, final Guard guard) throws IOException {
         guard.check();
         final IOException[] blocked = {null};
@@ -107,10 +99,9 @@ public final class FtpsTransfer {
         String binding = newAttemptName(entry.id, entry.metadata.wavSha256, profileRevision).substring(0, 67);
         if (!attemptName.startsWith(binding)) throw new IOException("Attempt is not bound to this source and destination revision");
         verifySource(catalog, entry, guard);
-        byte[] meta = metadata(entry, profileRevision); String metaHash = hash(meta);
-        byte[] marker = ("RECORDER-DELIVERY-V1\n" + attemptName + "\n" + profileRevision + "\n" + entry.id + "\n"
-            + entry.metadata.wavBytes + "\n" + entry.metadata.wavSha256 + "\n" + meta.length + "\n" + metaHash + "\n").getBytes(StandardCharsets.US_ASCII);
-        String markerHash = hash(marker);
+        FtpsDelivery delivery = FtpsDelivery.encode(entry, profileRevision, attemptName);
+        byte[] meta = delivery.metadataBytes(), marker = delivery.markerBytes();
+        String metaHash = delivery.metadataSha256, markerHash = delivery.markerSha256;
         guard.check();
         try (Connection control = connector.connect(profile.host, profile.port)) {
             if (control == null) throw new IOException("Transport returned no control connection");

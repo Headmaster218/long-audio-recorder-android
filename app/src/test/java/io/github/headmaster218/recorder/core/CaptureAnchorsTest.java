@@ -3,7 +3,6 @@ package io.github.headmaster218.recorder.core;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
-import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -81,15 +80,18 @@ public final class CaptureAnchorsTest {
         yes(Arrays.equals(pcm,assembled.toByteArray()));
         CommittedSegments catalog=new CommittedSegments(observed); CommittedSegments.Page page=catalog.page(null);
         yes(page.entries.size()==4 && page.rejected==0);
-        Method transport=FtpsTransfer.class.getDeclaredMethod("metadata",CommittedSegments.Entry.class,String.class); transport.setAccessible(true);
-        byte[] envelope=(byte[])transport.invoke(null,page.entries.get(0),"profile");
+        byte[] envelope=transportMetadata(page.entries.get(0));
         java.io.DataInputStream in=new java.io.DataInputStream(new java.io.ByteArrayInputStream(envelope));
         yes(in.readInt()==0x52465431); yes(in.readUTF().equals("profile")); yes(in.readUTF().equals(page.entries.get(0).id));
         byte[] local=new byte[in.readInt()]; in.readFully(local); yes(in.read()==-1); yes(SegmentMetadata.decode(local).schemaVersion==2);
         // Production transport encoding of a v1 catalog is stable across new-reader readback.
         CommittedSegments legacy=new CommittedSegments(plain); CommittedSegments.Entry entry=legacy.page(null).entries.get(0);
-        byte[] first=(byte[])transport.invoke(null,entry,"profile"); byte[] again=(byte[])transport.invoke(null,new CommittedSegments(plain).page(null).entries.get(0),"profile");
+        byte[] first=transportMetadata(entry); byte[] again=transportMetadata(new CommittedSegments(plain).page(null).entries.get(0));
         yes(Arrays.equals(first,again)); yes(Arrays.equals(PcmSegmentWriter.sha256().digest(first),PcmSegmentWriter.sha256().digest(again)));
+    }
+    private static byte[] transportMetadata(CommittedSegments.Entry entry) throws Exception {
+        String attempt=FtpsTransfer.newAttemptName(entry.id,entry.metadata.wavSha256,"profile");
+        return FtpsDelivery.encode(entry,"profile",attempt).metadataBytes();
     }
     private static void boundedUnavailableAndEpoch() throws Exception {
         Path root=root(); List<SegmentStore.Published> out=new ArrayList<SegmentStore.Published>();
