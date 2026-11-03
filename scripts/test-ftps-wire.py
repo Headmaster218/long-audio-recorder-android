@@ -4,8 +4,10 @@ import argparse,datetime,hashlib,json,os,pathlib,shutil,signal,socket,subprocess
 root=pathlib.Path(__file__).resolve().parents[1]
 p=argparse.ArgumentParser();p.add_argument('--production');p.add_argument('--android');p.add_argument('--execute-reviewed-fixture',action='store_true')
 p.add_argument('--host-source',action='store_true',help='Compile actual production FTPS sources with explicit host Android API fixtures; not SDK qualification')
-p.add_argument('--source-spool',type=pathlib.Path,help='Existing exact synthetic 11-second silence spool; four real-wire scenarios only')
+p.add_argument('--source-spool',type=pathlib.Path,help='Pinned synthetic spool: 11-second single delivery, or exact-boundary sequence with its flag')
+p.add_argument('--exact-boundary-sequence',action='store_true',help='Transfer only the pinned three-entry exact-STOP synthetic spool, one success session per ordinal')
 a=p.parse_args()
+if a.exact_boundary_sequence and not a.host_source:raise SystemExit('Exact sequence requires explicit host-source mode')
 if not a.execute_reviewed_fixture:raise SystemExit('No execution without --execute-reviewed-fixture')
 if sys.platform!='linux':raise SystemExit('This bounded process-tree runner is Linux-only')
 if os.sched_getaffinity(0)!={3}:raise SystemExit('Run with taskset -c 3 nice -n 19')
@@ -103,8 +105,9 @@ try:
  source_list=work/'sources.txt';source_list.write_text('\n'.join(str(f)for f in sources)+'\n')
  invoke(java+['-m','jdk.compiler/com.sun.tools.javac.Main','-source','8','-target','8','-Xlint:all,-options','-Werror',*compile_cp,'-d',classes,'@'+str(source_list)],work/'compile.log',60)
  scenarios=['success','untrusted_control','wrong_host_control','wrong_data_cert'] if a.host_source else ['success','untrusted_control','wrong_host_control','wrong_data_cert','corrupt_readback','truncated_readback','partial_disconnect','lost_final_reply','stalled_handshake']
- for scenario in scenarios:
-  case=work/scenario;case.mkdir();case_started=time.monotonic()
+ cases=[('success',i) for i in range(3)] if a.exact_boundary_sequence else [(s,None) for s in scenarios]
+ for scenario,ordinal in cases:
+  case=work/(scenario if ordinal is None else 'success-'+str(ordinal));case.mkdir();case_started=time.monotonic()
   certname='untrusted'if scenario=='untrusted_control'else'wrong'if scenario=='wrong_host_control'else'positive'
   env=dict(os.environ,PYTHONPATH=str(deps),PYTHONDONTWRITEBYTECODE='1')
   server=spawn([sys.executable,fixture/'server.py',scenario,case,keys/(certname+'.pem'),private,keys/'wrong.pem'],case/'server.log',env)
@@ -113,7 +116,7 @@ try:
    if server.poll()is not None or time.monotonic()-case_started>5:raise RuntimeError('Server did not become ready')
    time.sleep(.025)
   address=json.loads((case/'ready.json').read_text());assert address['host']=='127.0.0.1'
-  client=spawn(java+['-Djavax.net.ssl.trustStore='+str(trust),'-Djavax.net.ssl.trustStorePassword=synthetic','-Djavax.net.ssl.trustStoreType=PKCS12','-cp',runtime_cp,'io.github.headmaster218.recorder.android.WireClient',scenario,case,str(address['port'])]+([source_spool] if source_spool else []),case/'client.log')
+  client=spawn(java+['-Djavax.net.ssl.trustStore='+str(trust),'-Djavax.net.ssl.trustStorePassword=synthetic','-Djavax.net.ssl.trustStoreType=PKCS12','-cp',runtime_cp,'io.github.headmaster218.recorder.android.WireClient',scenario,case,str(address['port'])]+([source_spool]+([str(ordinal)] if ordinal is not None else []) if source_spool else []),case/'client.log')
   finish(client,25);(case/'stop').touch();finish(server,3)
   if time.monotonic()-case_started>30:raise TimeoutError('Thirty-second case bound')
   receipt=json.loads((case/'client.log').read_text().splitlines()[-1]);facts=json.loads((case/'server-result.json').read_text())
@@ -144,10 +147,12 @@ try:
    assert replay and all(c['cmd']not in('MKD','STOR','REST','RNFR','RNTO','DELE','RMD')for c in replay)
   if scenario in('corrupt_readback','truncated_readback','partial_disconnect','lost_final_reply'):assert facts['fault']
   assert all(c['cmd']not in('DELE','RMD')for c in facts['commands'])
-  results.append({'scenario':scenario,'seconds':round(time.monotonic()-case_started,3),'client':receipt,'server':facts})
-  if sum(r['server']['data_bytes']for r in results)>8*1024**2:raise RuntimeError('Aggregate application wire-byte bound')
+  results.append({'ordinal':ordinal,'scenario':scenario,'seconds':round(time.monotonic()-case_started,3),'client':receipt,'server':facts})
+  if sum(r['server']['data_bytes']for r in results)>(2 if a.exact_boundary_sequence else 8)*1024**2:raise RuntimeError('Aggregate application wire-byte bound')
   print('PASS real-wire case '+scenario,flush=True)
- report={'host_api_fixtures':a.host_source,'source_spool_supplied':source_spool is not None,'base_commit':'8edff98955655350e5af6b2d8b4ccdf4cb89fd9b','scenarios':results,'certificate_sha256':fingerprints,'peak_process_tree_rss':peak,'seconds':round(time.monotonic()-started,3),'dependencies':manifest,'limitations':'Real JVM sockets/TLS and production FTPS classes; Android routing/trust provider/lifecycle and automatic cleanup coordinator are not executed.'}
+ report={'host_api_fixtures':True,'production_compilation_mode':'host-source' if a.host_source else 'official-sdk-classes','exact_boundary_sequence':a.exact_boundary_sequence,'source_spool_supplied':source_spool is not None,'historical_fixture_origin_commit':'8edff98955655350e5af6b2d8b4ccdf4cb89fd9b','scenarios':results,'certificate_sha256':fingerprints,'peak_process_tree_rss':peak,'seconds':round(time.monotonic()-started,3),'dependencies':manifest,'limitations':'Real JVM sockets/TLS and production FTPS classes; Android routing/trust provider/lifecycle and automatic cleanup coordinator are not executed.'}
+ report['runner_sha256']=hashlib.sha256(pathlib.Path(__file__).read_bytes()).hexdigest()
+ report['server_sha256']=hashlib.sha256((fixture/'server.py').read_bytes()).hexdigest()
  report['compiled_source_sha256']={str(f.relative_to(root)):hashlib.sha256(f.read_bytes()).hexdigest()for f in sources}
  (work/'report.json').write_text(json.dumps(report,indent=2)+'\n')
  print('REPORT '+str(work/'report.json'))

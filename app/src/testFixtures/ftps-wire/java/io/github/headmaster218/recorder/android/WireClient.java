@@ -54,7 +54,7 @@ public final class WireClient {
     }
 
     private static void execute(String[] args) throws Exception {
-        require(args.length == 3 || args.length == 4, "Expected scenario, workdir, port, optional synthetic source spool");
+        require(args.length == 3 || args.length == 4 || args.length == 5, "Expected scenario, workdir, port, optional synthetic source spool");
         String scenario = args[0];
         require(Arrays.asList("success", "untrusted_control", "wrong_host_control", "wrong_data_cert",
             "corrupt_readback", "truncated_readback", "partial_disconnect", "lost_final_reply",
@@ -65,19 +65,50 @@ public final class WireClient {
         if (!Files.exists(workdir, LinkOption.NOFOLLOW_LINKS)) Files.createDirectory(workdir);
         require(Files.isDirectory(workdir, LinkOption.NOFOLLOW_LINKS)
             && workdir.equals(workdir.toRealPath()), "Workdir must have a canonical non-symlink path");
-        boolean supplied = args.length == 4;
+        boolean supplied = args.length >= 4;
+        boolean sequence = args.length == 5;
         Path root = supplied ? Paths.get(args[3]).toAbsolutePath().normalize() : workdir.resolve("spool");
         CommittedSegments.Entry entry;
         if (supplied) {
             require(Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS) && root.equals(root.toRealPath()), "Canonical source required");
-            CommittedSegments.Page page = new CommittedSegments(root).page(null);
-            require(page.entries.size() == 1 && !page.hasMore && page.rejected == 0, "One synthetic source required");
-            entry = page.entries.get(0);
-            require(entry.metadata.intent.epoch.captureId.equals("synthetic-silence-11s-v2")
-                && entry.metadata.frameCount == 176000 && entry.metadata.wavBytes == 352044
-                && hash(entry.metadata.encode()).equals("84022fe2042b3b6ce6602413a85732099a7567612c6d175ef7b275b66b5e222d")
-                && entry.metadata.wavSha256.equals("1a092b23d9dfe64d53943d18262c0a49eaf32c5ab5f2b016cd8edd16ec9440dd"),
-                "Only the exact synthetic 11-second silence fixture is allowed");
+            CommittedSegments suppliedCatalog = new CommittedSegments(root);
+            CommittedSegments.Page page = suppliedCatalog.page(null);
+            if (sequence) {
+                require("success".equals(scenario), "Exact sequence only supports success");
+                int ordinal = Integer.parseInt(args[4]);
+                require(ordinal >= 0 && ordinal < 3, "Invalid exact sequence ordinal");
+                require(page.entries.size() == 3 && !page.hasMore && page.rejected == 0,
+                    "Exactly three synthetic entries required");
+                String[] manifests = {
+                    "12702a330b63a9ee437d81fdfdb6b7da83722290536959ca42aa4a38707050de",
+                    "a416fca6da7825e4ad59e06425ddbcdad7932755abb5ed876edfe8a8f14bcd5d",
+                    "8bebf1064161dd46a027979df20470814a2f1ae440dceea8b767d43d33edaaea"};
+                entry = null;
+                boolean[] found = new boolean[3];
+                for (CommittedSegments.Entry candidate : page.entries) {
+                    int matched = -1;
+                    for (int i = 0; i < manifests.length; i++)
+                        if (hash(candidate.metadata.encode()).equals(manifests[i])) matched = i;
+                    require(matched >= 0 && !found[matched], "Unexpected or duplicate synthetic manifest");
+                    found[matched] = true;
+                    require(candidate.metadata.frameCount == 64000 && candidate.metadata.wavBytes == 128044
+                        && candidate.metadata.wavSha256.equals("f751fd7094be088dc785125e4a1a0222a17c2bd20469aa31728ca5e515ed5809"),
+                        "Only exact four-second synthetic silence is allowed");
+                    suppliedCatalog.verify(candidate, NEVER_CANCEL);
+                    require(sourceHash(suppliedCatalog, candidate, 128 * 1024).equals(candidate.metadata.wavSha256),
+                        "Synthetic sequence source hash mismatch");
+                    if (matched == ordinal) entry = candidate;
+                }
+                require(entry != null, "Selected ordinal missing");
+            } else {
+                require(page.entries.size() == 1 && !page.hasMore && page.rejected == 0, "One synthetic source required");
+                entry = page.entries.get(0);
+                require(entry.metadata.intent.epoch.captureId.equals("synthetic-silence-11s-v2")
+                    && entry.metadata.frameCount == 176000 && entry.metadata.wavBytes == 352044
+                    && hash(entry.metadata.encode()).equals("84022fe2042b3b6ce6602413a85732099a7567612c6d175ef7b275b66b5e222d")
+                    && entry.metadata.wavSha256.equals("1a092b23d9dfe64d53943d18262c0a49eaf32c5ab5f2b016cd8edd16ec9440dd"),
+                    "Only the exact synthetic 11-second silence fixture is allowed");
+            }
         } else {
             require(!Files.exists(root, LinkOption.NOFOLLOW_LINKS), "Each case needs a fresh spool");
             entry = createSource(root);
