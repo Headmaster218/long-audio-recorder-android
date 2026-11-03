@@ -86,6 +86,7 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
     private String publishing; // Identity is published/cleared only under this owner monitor.
     private volatile boolean closed;
     private boolean closing;
+    private boolean writerOpened, recoveryFailed;
     private Maintenance maintenance;
     private final SpoolUsage usage;
     private final Map<String,Long> sequences=new HashMap<String,Long>();
@@ -196,6 +197,11 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
         return p;
     }
     @Override public Staging open(Intent intent) throws IOException {
+        synchronized(this) {
+            if(closing || recoveryFailed) throw new IOException("owner closing or recovery outcome uncertain; reopen required");
+            // A recovery operation holds this monitor until its idle-only I/O finishes.
+            writerOpened=true;
+        }
         live(); if (active != null && !active.done) throw new IOException("only one open segment allowed");
         if (intent.sequence==Long.MAX_VALUE || intent.sequence < nextSequence(intent.epoch.captureId)) throw new IOException("stale/reused sequence");
         String identity = id(intent); Path stage = root.resolve(identity + ".part");
@@ -323,6 +329,62 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
         if (!Arrays.equals(m.encode(), finalCheck.encode())) throw new IOException("metadata changed during confirmation");
         synchronized(this) { confirmed.add(localObjectId); }
         return new Published(localObjectId, m);
+    }
+    /**
+     * Explicit restart-only completion of an already sealed .part, never raw PCM salvage.
+     * The original manifest, reason and anchors are retained byte-for-byte. Requires a
+     * newly opened owner that has never attempted capture and has no maintenance lease.
+     * Idle-only I/O holds the owner monitor to exclude open/maintenance/close races.
+     * Failure after mutation requires closing and reopening the owner before recording
+     * or another recovery attempt; inspect .part/.ready rather than blindly retrying.
+     */
+    public synchronized Published recoverFinalizedPart(String localObjectId) throws IOException {
+        live();
+        if(closing || writerOpened || active!=null || maintenance!=null || publishing!=null || recoveryFailed)
+            throw new IOException("recovery requires an idle fresh owner");
+        if(localObjectId==null || !localObjectId.endsWith(".part"))
+            throw new IOException("recovery requires an exact staged object");
+        Path directory=object(localObjectId);
+        checkEntries(directory,true);
+        byte[] originalIntent=readSmall(directory.resolve(INTENT));
+        byte[] originalManifest=readSmall(directory.resolve(MANIFEST));
+        Intent intent=SegmentMetadata.decodeIntent(originalIntent);
+        if(!localObjectId.equals(id(intent)+".part")) throw new IOException("partial identity mismatch");
+        SegmentMetadata metadata=checkManifest(directory,intent);
+        Path target=root.resolve(id(intent)+".ready");
+        if(Files.exists(target,LinkOption.NOFOLLOW_LINKS)) throw new IOException("destination already exists");
+        // All logical bytes were charged by the opening inventory; rename adds no payload.
+        if(!usage.contains(localObjectId)) throw new IOException("staging object absent from owner inventory");
+        try {
+            for(String name:new String[]{INTENT,WAV,MANIFEST}) {
+                Operation sync=name.equals(INTENT)?Operation.SYNC_INTENT:
+                    name.equals(WAV)?Operation.SYNC_FINAL_WAV:Operation.SYNC_MANIFEST;
+                op(sync,directory.resolve(name));
+                try(FileChannel channel=FileChannel.open(directory.resolve(name),StandardOpenOption.WRITE,LinkOption.NOFOLLOW_LINKS)) {
+                    channel.force(true);
+                }
+            }
+            syncDirectory(Operation.SYNC_STAGE,directory);
+            checkEntries(directory,true);
+            if(!Arrays.equals(originalIntent,readSmall(directory.resolve(INTENT)))
+                    || !Arrays.equals(originalManifest,readSmall(directory.resolve(MANIFEST))))
+                throw new IOException("journal bytes changed during recovery");
+            SegmentMetadata checked=checkManifest(directory,SegmentMetadata.decodeIntent(readSmall(directory.resolve(INTENT))));
+            if(!Arrays.equals(metadata.encode(),checked.encode())) throw new IOException("metadata changed during recovery");
+            publishing=target.getFileName().toString();
+            op(Operation.PUBLISH,target); protocol.atomicPublish(directory,target);
+            syncDirectory(Operation.SYNC_ROOT,root);
+            SegmentMetadata finalCheck=validate(target);
+            if(!Arrays.equals(originalIntent,readSmall(target.resolve(INTENT)))
+                    || !Arrays.equals(originalManifest,readSmall(target.resolve(MANIFEST))))
+                throw new IOException("journal bytes changed after recovery publication");
+            if(!Arrays.equals(metadata.encode(),finalCheck.encode())) throw new IOException("metadata changed after recovery publication");
+            confirmed.add(publishing); eligible.add(SpoolUsage.key(publishing)); publishing=null;
+            return new Published(target.getFileName().toString(),finalCheck);
+        } catch(IOException | RuntimeException failed) {
+            recoveryFailed=true;
+            throw failed;
+        }
     }
     /** Read-only recovery report: partial/corrupt bytes are preserved, never silently truncated or promoted. */
     public void scan(RecoveryListener listener) throws IOException {
