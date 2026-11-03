@@ -19,6 +19,10 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.TreeSet;
 import io.github.headmaster218.recorder.core.CaptureTimeline.SegmentManifest;
 import io.github.headmaster218.recorder.core.SegmentMetadata.Intent;
 
@@ -343,7 +347,13 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
      * Failure after mutation requires closing and reopening the owner before recording
      * or another recovery attempt; inspect .part/.ready rather than blindly retrying.
      */
-    public synchronized Published recoverFinalizedPart(String localObjectId) throws IOException {
+    public Published recoverFinalizedPart(String localObjectId) throws IOException {
+        return recoverFinalizedPart(localObjectId,NEVER_CANCEL);
+    }
+    /** Cancellation is checked during pre-publication hashing, never after rename begins. */
+    public synchronized Published recoverFinalizedPart(String localObjectId,VerifiedExport.Cancellation cancellation) throws IOException {
+        if(cancellation==null)throw new IllegalArgumentException();
+        VerifiedExport.checkCancelled(cancellation);
         live();
         if(closing || writerOpened || active!=null || maintenance!=null || publishing!=null || recoveryFailed)
             throw new IOException("recovery requires an idle fresh owner");
@@ -355,7 +365,7 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
         byte[] originalManifest=readSmall(directory.resolve(MANIFEST));
         Intent intent=SegmentMetadata.decodeIntent(originalIntent);
         if(!localObjectId.equals(id(intent)+".part")) throw new IOException("partial identity mismatch");
-        SegmentMetadata metadata=checkManifest(directory,intent);
+        SegmentMetadata metadata=checkManifest(directory,intent,cancellation);
         Path target=root.resolve(id(intent)+".ready");
         if(Files.exists(target,LinkOption.NOFOLLOW_LINKS)) throw new IOException("destination already exists");
         // All logical bytes were charged by the opening inventory; rename adds no payload.
@@ -374,8 +384,9 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
             if(!Arrays.equals(originalIntent,readSmall(directory.resolve(INTENT)))
                     || !Arrays.equals(originalManifest,readSmall(directory.resolve(MANIFEST))))
                 throw new IOException("journal bytes changed during recovery");
-            SegmentMetadata checked=checkManifest(directory,SegmentMetadata.decodeIntent(readSmall(directory.resolve(INTENT))));
+            SegmentMetadata checked=checkManifest(directory,SegmentMetadata.decodeIntent(readSmall(directory.resolve(INTENT))),cancellation);
             if(!Arrays.equals(metadata.encode(),checked.encode())) throw new IOException("metadata changed during recovery");
+            VerifiedExport.checkCancelled(cancellation);
             publishing=target.getFileName().toString();
             op(Operation.PUBLISH,target); protocol.atomicPublish(directory,target);
             syncDirectory(Operation.SYNC_ROOT,root);
@@ -390,6 +401,52 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
             recoveryFailed=true;
             throw failed;
         }
+    }
+    public static final class StagedPage {
+        public final List<String> objectIds;
+        public final int remaining;
+        public final String nextCursor;
+        StagedPage(List<String> ids,int remaining) {
+            objectIds=Collections.unmodifiableList(ids);this.remaining=remaining;
+            nextCursor=remaining>0?ids.get(ids.size()-1):null;
+        }
+    }
+    private void idleRecovery()throws IOException {
+        live();
+        if(closing||writerOpened||active!=null||maintenance!=null||publishing!=null||recoveryFailed)
+            throw new IOException("recovery requires an idle fresh owner");
+    }
+    /** Namespace-only bounded page. Ready payloads are never opened or hashed here. */
+    public synchronized StagedPage stagedPage(String after,int limit,VerifiedExport.Cancellation cancellation)throws IOException {
+        idleRecovery();
+        if(cancellation==null||limit<1||limit>32||after!=null&&!after.matches("segment-[0-9a-f]{64}-[0-9]+\\.part"))
+            throw new IllegalArgumentException("invalid staged-page cursor/bound");
+        TreeSet<String> names=new TreeSet<String>();int count=0;
+        try(DirectoryStream<Path> entries=Files.newDirectoryStream(root)) {
+            for(Path p:entries) {
+                VerifiedExport.checkCancelled(cancellation);
+                String name=p.getFileName().toString();
+                if(name.matches("segment-[0-9a-f]{64}-[0-9]+\\.part")&&(after==null||name.compareTo(after)>0)) {
+                    count++;names.add(name);if(names.size()>limit)names.pollLast();
+                }
+            }
+        }
+        return new StagedPage(new ArrayList<String>(names),count-names.size());
+    }
+    /** Read-only validation of one staged object; cancellation never promotes it. */
+    public synchronized Recovery inspectStaged(String name,VerifiedExport.Cancellation cancellation)throws IOException {
+        idleRecovery();if(cancellation==null)throw new IllegalArgumentException();VerifiedExport.checkCancelled(cancellation);
+        if(name==null||!name.endsWith(".part"))throw new IOException("staged identity required");
+        Path dir=object(name);boolean hasManifest=checkEntries(dir,false);
+        Intent intent=SegmentMetadata.decodeIntent(readSmall(dir.resolve(INTENT)));
+        if(!name.equals(id(intent)+".part"))throw new IOException("partial identity mismatch");
+        long data=Files.size(dir.resolve(WAV))-WavHeader.BYTES;
+        if(data<0||data>intent.epoch.format.bytesForFrames(intent.targetFrames))throw new IOException("invalid staged size");
+        checkStagedHeader(dir.resolve(WAV),intent,data);
+        if(hasManifest)checkManifest(dir,intent,cancellation);
+        long frameBytes=intent.epoch.format.channels*2L;
+        return new Recovery(name,RecoveryState.PRESERVED_PARTIAL,data/frameBytes,data%frameBytes,
+            "observed staged object; publication requires explicit revalidation",hasManifest);
     }
     /** Read-only recovery report: partial/corrupt bytes are preserved, never silently truncated or promoted. */
     public void scan(RecoveryListener listener) throws IOException {

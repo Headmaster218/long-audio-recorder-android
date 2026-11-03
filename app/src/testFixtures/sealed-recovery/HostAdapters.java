@@ -16,13 +16,13 @@ final class RetirementStore implements DirectorySpool.Initializer {
 }
 final class AndroidDirectoryProtocol implements DirectorySpool.DirectoryProtocol {
     static volatile CountDownLatch entered,release;
-    static volatile boolean failAfterPublish;
+    static volatile boolean failAfterPublish,gatePublication;
     static volatile int publications;
     private final DirectorySpool.NioProtocol nio=new DirectorySpool.NioProtocol();
     private boolean published;
-    static void reset(){entered=null;release=null;failAfterPublish=false;publications=0;}
+    static void reset(){entered=null;release=null;failAfterPublish=false;gatePublication=false;publications=0;}
     @Override public void syncDirectory(Path directory)throws IOException {
-        if(directory.getFileName().toString().endsWith(".part")&&entered!=null){
+        if(directory.getFileName().toString().endsWith(".part")&&entered!=null&&!gatePublication){
             entered.countDown();
             try{if(!release.await(10,TimeUnit.SECONDS))throw new IOException("host test gate timeout");}
             catch(InterruptedException e){Thread.currentThread().interrupt();throw new IOException(e);}
@@ -32,5 +32,10 @@ final class AndroidDirectoryProtocol implements DirectorySpool.DirectoryProtocol
     }
     @Override public void atomicPublish(Path from,Path to)throws IOException {
         nio.atomicPublish(from,to);published=true;publications++;
+        if(gatePublication&&entered!=null){
+            entered.countDown();
+            try{if(!release.await(10,TimeUnit.SECONDS))throw new IOException("host publication gate timeout");}
+            catch(InterruptedException e){Thread.currentThread().interrupt();throw new IOException(e);}
+        }
     }
 }

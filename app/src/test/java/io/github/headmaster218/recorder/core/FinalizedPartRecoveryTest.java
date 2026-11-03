@@ -11,6 +11,7 @@ import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Explicit sealed-object recovery only. All fixtures are tiny synthetic host data. */
 public final class FinalizedPartRecoveryTest {
@@ -198,10 +199,45 @@ public final class FinalizedPartRecoveryTest {
             yes(Files.exists(root.resolve(part.replace(".part",".ready"))));
         }
     }
+    private static void cancellationBoundaries()throws Exception {
+        Path root=fixture("STOP");String part=object(root,".part");
+        byte[] before=Files.readAllBytes(root.resolve(part).resolve("audio.wav"));
+        try(DirectorySpool store=open(root,(op,p)->{})) {
+            final int[] polls={0};
+            rejects(()->store.inspectStaged(part,()->++polls[0]>1));
+            yes(polls[0]>1);yes(Files.exists(root.resolve(part)));
+        }
+        for(String point:new String[]{"SYNC_STAGE","PUBLISH"}) {
+            root=fixture("STOP");final String id=object(root,".part");AtomicBoolean cancel=new AtomicBoolean();
+            try(DirectorySpool store=open(root,(op,p)->{if(op.name().equals(point))cancel.set(true);})) {
+                if(point.equals("SYNC_STAGE")) {
+                    rejects(()->store.recoverFinalizedPart(id,cancel::get));
+                    yes(Files.exists(root.resolve(id)));yes(!Files.exists(root.resolve(id.replace(".part",".ready"))));
+                    yes(Arrays.equals(before,Files.readAllBytes(root.resolve(id).resolve("audio.wav"))));
+                } else {
+                    SegmentStore.Published result=store.recoverFinalizedPart(id,cancel::get);
+                    yes(cancel.get());yes(result.metadata.closeReason==CaptureTimeline.Close.STOP);
+                    yes(Files.exists(root.resolve(result.localObjectId)));yes(!Files.exists(root.resolve(id)));
+                }
+            }
+        }
+        root=fixture("STOP");String selected=object(root,".part");
+        // A malformed ready payload must never be hashed by a staged-only recovery page.
+        Path ready=root.resolve(selected.replace("-0.part","-1.ready"));Files.createDirectory(ready);
+        Files.write(ready.resolve("audio.wav"),new byte[]{1,2,3});
+        try(DirectorySpool store=open(root,(op,p)->{})) {
+            DirectorySpool.StagedPage page=store.stagedPage(null,32,()->false);
+            yes(page.objectIds.size()==1&&page.objectIds.get(0).equals(selected));
+            yes(page.remaining==0&&page.nextCursor==null);
+            SealedRecovery.Result result=SealedRecovery.runPage(store,null,()->false,count->{});
+            yes(result.recovered==1&&result.preserved==0);
+            yes(Arrays.equals(Files.readAllBytes(ready.resolve("audio.wav")),new byte[]{1,2,3}));
+        }
+    }
     public static void main(String[] args)throws Exception {
         if(args.length>0){child(args[0],Paths.get(args[1]),args[2],args[3]);return;}
         base=Files.createDirectories(Paths.get("app/build/finalized-part-recovery-tests/run-"+System.nanoTime()));
-        normalAndCrash();rejectedEvidence();exclusion();
+        normalAndCrash();rejectedEvidence();exclusion();cancellationBoundaries();
         System.out.println("PASS explicit finalized-part recovery: "+checks+" assertions, "+cases+" fixtures; host only");
     }
 }

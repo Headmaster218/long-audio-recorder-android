@@ -30,7 +30,7 @@ public final class MainActivity extends Activity {
     private FtpsControls ftps;
     private InputControls inputs;
     private Button start, pause, stop;
-    private Button recoverSealed;
+    private Button recoverSealed,cancelRecovery;
     private TextView recoveryStatus;
     private SealedRecoveryCoordinator sealedRecovery;
     private boolean resumed, pendingRecoveryOptIn;
@@ -45,6 +45,7 @@ public final class MainActivity extends Activity {
             boolean running = RecorderState.active;
             start.setEnabled(!running && !pending.waiting() && !sealedRecovery.busy()); pause.setEnabled(running || pending.waiting());
             recoverSealed.setEnabled(!running && !pending.waiting() && !sealedRecovery.busy());
+            cancelRecovery.setEnabled(sealedRecovery.busy());
             recoveryStatus.setText(sealedRecovery.status());
             rate.setEnabled(!running && !pending.waiting()); channels.setEnabled(!running && !pending.waiting()); seconds.setEnabled(!running && !pending.waiting()); cache.setEnabled(!running && !pending.waiting());
             inputs.enabled(!running && !pending.waiting());
@@ -92,12 +93,14 @@ public final class MainActivity extends Activity {
         text(column,"Android may let you dismiss the ongoing notification. A swipe alone does not stop recording or trigger forced reposts. Reopen this app for Stop/Pause; Android microphone/active-app controls remain available where supported.",14);
         sealedRecovery=SealedRecoveryCoordinator.get(this);
         text(column,"Recover sealed recordings after an interruption",20);
-        text(column,"Only recordings with an intact final manifest, header and matching hashes can become completed files. Unfinished or damaged audio stays untouched. This does not resume the microphone or invent Stop. Stop recording and finish exports first. Up to 32 sealed recordings per tap. The scan checks the whole spool and may take time; Start and exports wait until it ends. Work continues in this process if the screen is recreated. Existing opted-in upload and cleanup policies may later apply to recovered completed files.",14);
+        text(column,"Only recordings with an intact final manifest, header and matching hashes can become completed files. Unfinished or damaged audio stays untouched. This does not resume the microphone or invent Stop. Stop recording and finish exports first. Each tap checks up to 32 staged objects, skips completed audio and saves sweep progress for the next tap. Large segments can take time. Cancel stops pre-publication checks; a publication already underway must finish safely before Start/export unlock. Work continues through screen recreation. Existing opted-in upload and cleanup policies may later apply to recovered completed files.",14);
         recoverSealed=button(column,"Check / recover sealed recordings",new View.OnClickListener(){@Override public void onClick(View v){
             if(!resumed || RecorderState.active || pending.waiting() || sealedRecovery.busy())return;
             try{sealedRecovery.start(displayedSettings().cacheBytes);recoverSealed.setEnabled(false);start.setEnabled(false);recoveryStatus.setText(sealedRecovery.status());}
             catch(IllegalArgumentException failed){message(failed.getMessage());}
         }});
+        cancelRecovery=button(column,"Cancel recovery checks",new View.OnClickListener(){@Override public void onClick(View v){sealedRecovery.cancel();recoveryStatus.setText(sealedRecovery.status());}});
+        cancelRecovery.setEnabled(sealedRecovery.busy());
         recoveryStatus=text(column,sealedRecovery.status(),14);
         exports = new ExportControls(this,column,saved);
         ftps = new FtpsControls(this,column);

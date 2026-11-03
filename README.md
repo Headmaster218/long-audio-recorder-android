@@ -159,6 +159,8 @@ The app now offers [Check / recover sealed recordings](docs/sealed-recovery-app-
 while idle. It completes publication only for intact, already-sealed staged
 objects, preserving original metadata and leaving uncertain tails untouched.
 The background pass requires an explicit tap and does not restart recording.
+Checks now use [resumable staged-only pages and cooperative cancellation](docs/paged-sealed-recovery-20261103.md),
+without rehashing completed audio or weakening final validation.
 Fresh SDK/unsigned-build and host/backend-admission checks are documented;
 physical-device, power-loss and all-day operation remain unqualified.
 

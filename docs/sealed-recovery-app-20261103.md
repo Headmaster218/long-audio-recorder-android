@@ -1,5 +1,9 @@
 # Explicit sealed-recording recovery in the Android app
 
+The current implementation adds [paged, cancellable staged-only checks](paged-sealed-recovery-20261103.md).
+The measurements and whole-spool limitation below describe the preceding app
+checkpoint; the new page flow supersedes that scan behavior.
+
 ## User-visible flow
 
 The active assembled MainActivity now has **Check / recover sealed recordings**.
