@@ -68,9 +68,14 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
         public final RecoveryState state;
         public final long observedWholeFrames, trailingBytes;
         public final String detail;
+        /** Read-only eligibility hint for .part only; recovery always revalidates under ownership. */
+        public final boolean validatedManifest;
         private Recovery(String id, RecoveryState state, long frames, long tail, String detail) {
+            this(id,state,frames,tail,detail,false);
+        }
+        private Recovery(String id, RecoveryState state, long frames, long tail, String detail,boolean validatedManifest) {
             this.localObjectId = id; this.state = state; this.observedWholeFrames = frames;
-            this.trailingBytes = tail; this.detail = detail;
+            this.trailingBytes = tail; this.detail = detail; this.validatedManifest=validatedManifest;
         }
     }
     public interface RecoveryListener { void found(Recovery recovery) throws IOException; }
@@ -413,7 +418,7 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
                         if (hasManifest) checkManifest(dir, i);
                         long frameBytes = i.epoch.format.channels * 2L;
                         result = new Recovery(name, RecoveryState.PRESERVED_PARTIAL, data / frameBytes, data % frameBytes,
-                            "observed frames only; no durable-prefix, header, content or continuity assertion");
+                            "observed frames only; no durable-prefix, header, content or continuity assertion",hasManifest);
                     }
                 } catch (IOException | IllegalArgumentException e) {
                     result = new Recovery(name, RecoveryState.CORRUPT_PRESERVED, 0, 0, e.getMessage());

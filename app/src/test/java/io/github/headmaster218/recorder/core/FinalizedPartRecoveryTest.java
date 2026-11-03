@@ -80,12 +80,20 @@ public final class FinalizedPartRecoveryTest {
             CommittedSegments catalog=new CommittedSegments(root);
             CommittedSegments.Entry entry=catalog.page(null).entries.get(0);catalog.verify(entry,()->false);
             String revision="synthetic-recovery";
-            FtpsDelivery delivery=FtpsDelivery.encode(entry,revision,
-                FtpsTransfer.newAttemptName(entry.id,entry.metadata.wavSha256,revision));
+            String attempt=FtpsTransfer.newAttemptName(entry.id,entry.metadata.wavSha256,revision);
+            FtpsDelivery delivery=FtpsDelivery.encode(entry,revision,attempt);
             try(DataInputStream input=new DataInputStream(new ByteArrayInputStream(delivery.metadataBytes()))) {
                 yes(input.readInt()==FtpsDelivery.MAGIC);yes(input.readUTF().equals(revision));yes(input.readUTF().equals(entry.id));
                 byte[] transported=new byte[input.readInt()];input.readFully(transported);
                 yes(Arrays.equals(transported,manifest));yes(input.read()==-1);
+            }
+            String output=System.getProperty("sealed.delivery.root");
+            if(output!=null) {
+                Path parent=Files.createDirectories(Paths.get(output).resolve(root.getFileName()));
+                Path destination=Files.createDirectory(parent.resolve(attempt));
+                Files.copy(root.resolve(entry.id).resolve("audio.wav"),destination.resolve("audio.wav"));
+                Files.write(destination.resolve("segment.v1.bin"),delivery.metadataBytes());
+                Files.write(destination.resolve("delivery.v1.txt"),delivery.markerBytes());
             }
             try(DirectorySpool.Maintenance lease=store.maintenance(result.localObjectId)){lease.confirm(()->false);}
             rejects(()->store.recoverFinalizedPart(part));

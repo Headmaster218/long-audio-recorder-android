@@ -10,10 +10,11 @@ a close reason, synthesizes capture observations or overwrites a destination.
 STOP, INTERRUPTION, ROTATION, schema version and anchors remain as originally
 sealed. Raw full-boundary staging without a manifest still remains uncertain.
 
-This is an explicit core API. It is not called by scan, CaptureEngine or the
-Android UI, does not restart microphone capture, and does not grant upload consent.
-Existing scans still report `.part` conservatively. A later Android recovery
-workflow needs separate lifecycle/UI design and device qualification.
+The initial checkpoint provided this explicit core API only. The subsequent
+[user-triggered app flow](sealed-recovery-app-20261103.md) calls it through an idle
+background worker; scan and CaptureEngine never invoke recovery automatically.
+It does not restart microphone capture or grant upload consent. Existing scans
+still report `.part` conservatively. Device qualification remains pending.
 
 ## Ownership and ordering
 

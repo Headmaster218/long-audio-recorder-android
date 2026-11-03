@@ -153,7 +153,16 @@ legacy eager callers and old metadata remain unchanged. One full segment waits
 for another read or explicit close before publication. Host tests are not device
 or all-day recording acceptance.
 
-### Fresh SDK build
+### Explicit sealed-recording recovery
+
+The app now offers [Check / recover sealed recordings](docs/sealed-recovery-app-20261103.md)
+while idle. It completes publication only for intact, already-sealed staged
+objects, preserving original metadata and leaving uncertain tails untouched.
+The background pass requires an explicit tap and does not restart recording.
+Fresh SDK/unsigned-build and host/backend-admission checks are documented;
+physical-device, power-loss and all-day operation remain unqualified.
+
+### Earlier SDK build
 
 [November 3 official-SDK validation](docs/unsigned-sdk-validation-20261103.md)
 built the terminal-aware integrated source successfully through unsigned APK
