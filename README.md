@@ -152,3 +152,10 @@ recording ends exactly on a segment boundary. Current CaptureEngine selects it;
 legacy eager callers and old metadata remain unchanged. One full segment waits
 for another read or explicit close before publication. Host tests are not device
 or all-day recording acceptance.
+
+### Fresh SDK build
+
+[November 3 official-SDK validation](docs/unsigned-sdk-validation-20261103.md)
+built the terminal-aware integrated source successfully through unsigned APK
+packaging, with fresh production admission/consent checks. No signing, installation
+or device/OEM acceptance is implied; identify builds by source and APK hash.
