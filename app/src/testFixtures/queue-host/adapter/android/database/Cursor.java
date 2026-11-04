@@ -1,0 +1,1 @@
+package android.database; public interface Cursor extends java.io.Closeable {int FIELD_TYPE_NULL=0,FIELD_TYPE_INTEGER=1,FIELD_TYPE_FLOAT=2,FIELD_TYPE_STRING=3,FIELD_TYPE_BLOB=4;boolean moveToFirst();boolean moveToNext();long getLong(int i);int getInt(int i);String getString(int i);byte[] getBlob(int i);boolean isNull(int i);int getType(int i);void close();}

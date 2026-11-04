@@ -1,0 +1,1 @@
+package android.content; public class Context {private final java.io.File root;public Context(java.io.File r){root=r;if(!r.isDirectory()&&!r.mkdirs())throw new IllegalStateException("Cannot create fixture root");}public java.io.File getNoBackupFilesDir(){return root;}public java.io.File getFilesDir(){return root;}public Context getApplicationContext(){return this;}}

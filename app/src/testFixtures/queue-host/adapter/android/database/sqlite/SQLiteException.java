@@ -1,0 +1,1 @@
+package android.database.sqlite;public class SQLiteException extends RuntimeException {private static final long serialVersionUID=1;public SQLiteException(String s){super(s);}public SQLiteException(String s,Throwable t){super(s,t);}}

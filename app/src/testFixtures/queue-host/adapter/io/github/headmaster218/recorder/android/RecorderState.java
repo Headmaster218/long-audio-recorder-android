@@ -1,0 +1,1 @@
+package io.github.headmaster218.recorder.android;final class RecorderState {static String bounded(String s){return s==null?"Unknown interruption":s.substring(0,Math.min(s.length(),1200));}}
