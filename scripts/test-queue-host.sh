@@ -17,3 +17,6 @@ with sqlite3.connect(sys.argv[1]) as c:
  assert c.execute('pragma foreign_key_check').fetchall()==[]
 print('PASS real SQLite integrity and foreign-key checks')
 PY
+
+# Explicit historical selection tests use synthetic receipts, not a remote-deletion proof.
+java -Xmx64m -XX:+UseSerialGC -XX:ActiveProcessorCount=1 -Dqueue.host.bridge="$PWD/$fixture/sqlite_bridge.py" -cp "$out/classes" io.github.headmaster218.recorder.android.HistoricalCleanupRequestTest "$out/historical-evidence"
