@@ -28,6 +28,8 @@ Choose your own future deadline. This does not sign, install, publish or attach 
 APK. Device/OEM behavior, physical-server deployment and all-day recording are
 **not qualified** by host checks or unsigned packaging. See the concise
 [delivery guide](docs/repository-delivery.md) for output files, scope and limits.
+[November 4 validation](docs/delivery-validation-20261104.md): 42 host suites,
+official-SDK unsigned packaging and nine real FTPS/TLS loopback cases passed.
 
 ## Development history and feature boundaries
 

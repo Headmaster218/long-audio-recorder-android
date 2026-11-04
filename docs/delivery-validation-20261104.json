@@ -1,0 +1,259 @@
+{
+  "schema_version": 1,
+  "source_commit": "906e58bcd4e671fef43a888d1af7518f54fe203b",
+  "validated_utc_date": "2026-11-04",
+  "offline_host": {
+    "source_commit": "906e58bcd4e671fef43a888d1af7518f54fe203b",
+    "scope": "offline_host_only",
+    "passed": true,
+    "suites": [
+      {
+        "suite": "test-app-review.sh",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-app-safety.sh",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-auto-enrollment.sh",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-capture-anchors.sh",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-capture-evidence.sh",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-continuous-cleanup.sh",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-continuous-enrollment.sh",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-core-adversarial.sh",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-core.sh",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-export.sh",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-finalized-part-recovery.sh",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-ftps-delivery.sh",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-ftps-exact-boundary.sh",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-ftps-segmented-silence.sh",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-ftps-silence-fixture.sh",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-ftps.sh",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-history-retirement.sh",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-input-routing.sh",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-interruption-recovery.sh",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-notification-boundary.sh",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-recovery-integration.sh",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-recovery-session.sh",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-retirement-sentinel.sh",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-retirement-store.sh",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-sealed-recovery-coordinator.sh",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-spool-admission.sh",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-staged-process-death.sh",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-storage-adversarial.sh",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-storage.sh",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-terminal-boundary.sh",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-transfer-budget.sh",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-upload-threshold.sh",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-verified-cleanup.sh",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-auto-queue-sql.py",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-cleanup-queue-sql.py",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-ftps-queue-sql.py",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-history-queue-sql.py",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-transfer-budget-sql.py",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-upload-threshold-sql.py",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-ftps-wire-readiness.py",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-source-assembly.py",
+        "exit_code": 0
+      },
+      {
+        "suite": "test-delivery-verification.py",
+        "exit_code": 0
+      }
+    ],
+    "not_run": [
+      "SDK-backed admission and enrollment-consent fixtures",
+      "official SDK compile/APK packaging (unless separately requested)",
+      "real FTPS/TLS wire",
+      "Android runtime/device/OEM",
+      "physical server",
+      "all-day recording"
+    ]
+  },
+  "unsigned_build": {
+    "passed": true,
+    "apk_bytes": 161538,
+    "apk_sha256": "84b6113a7e372e1fa438f9925be96f8d19bca6fd13a347417f0f1fa89a25d807",
+    "sampled_process_tree_peak_mib": 144.32,
+    "generated_disk_bytes": 2404352,
+    "signed": false,
+    "installed": false
+  },
+  "sdk_fixtures": {
+    "network_admission_assertions": 944,
+    "enrollment_consent_assertions": 26,
+    "passed": true
+  },
+  "loopback": {
+    "passed": true,
+    "seconds": 23.549,
+    "sampled_process_tree_peak_bytes": 148307968,
+    "ephemeral_keys_removed": true,
+    "scenarios": [
+      {
+        "name": "success",
+        "source_unchanged": true,
+        "raw_sockets_closed": true
+      },
+      {
+        "name": "untrusted_control",
+        "source_unchanged": true,
+        "raw_sockets_closed": true
+      },
+      {
+        "name": "wrong_host_control",
+        "source_unchanged": true,
+        "raw_sockets_closed": true
+      },
+      {
+        "name": "wrong_data_cert",
+        "source_unchanged": true,
+        "raw_sockets_closed": true
+      },
+      {
+        "name": "corrupt_readback",
+        "source_unchanged": true,
+        "raw_sockets_closed": true
+      },
+      {
+        "name": "truncated_readback",
+        "source_unchanged": true,
+        "raw_sockets_closed": true
+      },
+      {
+        "name": "partial_disconnect",
+        "source_unchanged": true,
+        "raw_sockets_closed": true
+      },
+      {
+        "name": "lost_final_reply",
+        "source_unchanged": true,
+        "raw_sockets_closed": true
+      },
+      {
+        "name": "stalled_handshake",
+        "source_unchanged": true,
+        "raw_sockets_closed": true
+      }
+    ]
+  },
+  "device_tested": false,
+  "physical_server_tested": false,
+  "all_day_qualified": false,
+  "github_actions_runs_observed": 0
+}
