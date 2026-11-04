@@ -586,9 +586,28 @@ final class FtpsCoordinator {
                 : "Transfer budget setting saved. Charges were not reset; hard network gates and existing authorizations unchanged.",false);
         } });
     }
+    /** Explicit retry only: temporary key locks never justify creating a key or retaining plaintext. */
+    private void retryRememberedCredentials() {
+        java.util.HashSet<String> retried=new java.util.HashSet<String>();
+        for(FtpsQueue.Item item:queue.items(false)) {
+            if(!item.state.equals("NEEDS_CREDENTIALS")
+                && !(item.state.equals("VERIFIED_AT_TIME") && item.cleanupState.equals("WAIT_CREDENTIALS")))continue;
+            if(retried.contains(item.revision))continue;
+            if(retried.size()>=FtpsQueue.MAX_PROFILES)break;
+            retried.add(item.revision);
+            FtpsQueue.Profile profile=queue.profile(item.revision);
+            if(profile==null || profile.credential==null)continue;
+            char[] probe=null;boolean unlocked=false;
+            try { probe=FtpsCredentials.unlock(profile.revision,profile.credential);unlocked=true; }
+            catch(Exception unavailable) { /* Locked, missing or invalid keys remain blocked. */ }
+            finally { if(probe!=null)Arrays.fill(probe,'\0'); }
+            // Keep journal failures outside the credential-exception handler.
+            if(unlocked)queue.credentialsReady(profile.revision);
+        }
+    }
     void uploadNow() {
         command(new Command() { @Override public void run() {
-            pauseRequested.set(false); queue.uploadNow(); catchupDeferred = false; postCatchup(); publish("Queued work requested. Charging, unmetered Wi-Fi, runtime permission and trusted TLS remain mandatory.",false);
+            pauseRequested.set(false); retryRememberedCredentials(); queue.uploadNow(); catchupDeferred = false; postCatchup(); publish("Queued work requested. Charging, unmetered Wi-Fi, runtime permission and trusted TLS remain mandatory.",false);
         } });
     }
     void pause() {
@@ -694,7 +713,7 @@ final class FtpsCoordinator {
             if (profile == null) { queue.state(item,"BLOCKED","Saved destination is unavailable",0); return; }
             try { secret = password(profile); }
             catch (Exception e) {
-                queue.state(item,"NEEDS_CREDENTIALS","Password unavailable or secure storage locked. Unlock device and explicitly save credentials for this exact profile again.",0);
+                queue.state(item,"NEEDS_CREDENTIALS","Password unavailable or secure storage locked. Unlock device and use Upload queued now to retry a remembered credential; missing or invalid credentials require saving the password again.",0);
                 publish("Transfer blocked until credentials are supplied for the exact destination revision.",false); return;
             }
             final CommittedSegments.Entry entry;

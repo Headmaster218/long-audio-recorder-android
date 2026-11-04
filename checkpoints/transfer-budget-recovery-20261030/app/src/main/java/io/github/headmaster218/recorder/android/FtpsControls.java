@@ -46,7 +46,7 @@ final class FtpsControls {
         saveThreshold = button(column,"Save upload threshold…",new View.OnClickListener() {
             @Override public void onClick(View v) { confirmThreshold(); }
         });
-        text(column,"Upload queued now / resume overrides only the byte trigger for currently runnable queued rows and resumes a paused queue. It does not bypass safety gates or retry delays; future rows still need the threshold unless requested again. Already-started attempts use readback-only reconciliation independently of the byte trigger.",14);
+        text(column,"Upload queued now / resume overrides only the byte trigger for currently runnable queued rows and resumes a paused queue. It does not bypass safety gates or retry delays; future rows still need the threshold unless requested again. Already-started attempts use readback-only reconciliation independently of the byte trigger. If remembered credentials were temporarily locked, unlock the device and use this action to retry the existing encrypted credential. Missing or invalid credentials still require saving a password again.",14);
         text(column,"Optional app FTPS file-data budget",18);
         budgetEnabled=new CheckBox(activity); budgetEnabled.setText("Enforce a manually reset budget (default OFF; Save required)"); column.addView(budgetEnabled);
         budgetLimit=field(column,"Budget limit in decimal bytes (positive when enabled)","",32,InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
