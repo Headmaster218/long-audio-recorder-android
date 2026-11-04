@@ -42,7 +42,10 @@ assembly provenance and source wiring. The runner excludes SDK-backed admission
 and enrollment-consent tests because they require compiled Android classes, and
 excludes the real FTPS/TLS loopback runner because it needs separate dependencies
 and network fixtures. These are stated as NOT RUN, not silently treated as passes.
-Generated test data stays local under ignored build directories.
+Generated test data stays local under ignored build directories. Unrecorded Python
+bytecode caches under scripts are rejected because they can override source at
+import time; the supported host tests do not create those caches. See
+[cache integrity](delivery-bytecode-integrity-20261104.md).
 
 ## Optional unsigned Linux build
 

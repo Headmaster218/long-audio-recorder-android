@@ -34,14 +34,13 @@ def verify(root):
         if len(data) != entry['bytes'] or hashlib.sha256(data).hexdigest() != entry['sha256'] or mode != int(entry['mode'][-3:], 8):
             raise ValueError('Assembled source changed: ' + name)
     # Added Java/resources/scripts could alter a build without changing any listed file.
-    # Generated output is deliberately excluded; it is never an input source.
+    # Build output is excluded. Python caches under scripts are NOT excluded:
+    # an unchecked-hash cache can execute instead of the recorded source.
     for directory in ('app/src', 'scripts'):
         for path in (root / directory).rglob('*'):
             relative = path.relative_to(root)
             if path.is_symlink():
                 raise ValueError('Symlink in source inputs: ' + str(relative))
-            if directory == 'scripts' and relative.parent == Path('scripts/__pycache__') and path.suffix == '.pyc':
-                continue
             if path.is_file() and relative.as_posix() not in expected:
                 raise ValueError('Unrecorded source file: ' + str(path.relative_to(root)))
     for required in ('build.gradle', 'app/build.gradle', 'app/src/main/AndroidManifest.xml', 'source-overlays.json', 'scripts/build-android-unsigned.py'):

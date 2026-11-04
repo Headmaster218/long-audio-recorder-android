@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """Synthetic delivery-source validation regressions, without SDK/network/device."""
 import hashlib
-import importlib.util
+import types
 import json
+import py_compile
 from pathlib import Path
 import tempfile
 import unittest
 
-spec = importlib.util.spec_from_file_location('verification', Path(__file__).with_name('verify-assembled-source.py'))
-verification = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(verification)
+# Compile source bytes directly: neither consume nor create unrecorded .pyc files.
+helper_path = Path(__file__).with_name('verify-assembled-source.py')
+verification = types.ModuleType('verification')
+verification.__file__ = str(helper_path)
+exec(compile(helper_path.read_bytes(), str(helper_path), 'exec'), verification.__dict__)
 
 
 class VerificationTest(unittest.TestCase):
@@ -58,13 +61,24 @@ class VerificationTest(unittest.TestCase):
         target.write_text('extra source')
         with self.assertRaises(ValueError): verification.verify(self.root)
 
-    def test_python_bytecode_allowed_but_symlink_rejected(self):
+    def test_unrecorded_python_bytecode_and_symlink_rejected(self):
         target = self.root/'scripts/__pycache__/helper.pyc'
         target.parent.mkdir()
         target.write_bytes(b'generated Python bytecode')
-        self.assertEqual(verification.verify(self.root), 'a'*40)
+        with self.assertRaises(ValueError): verification.verify(self.root)
         target.unlink()
         target.symlink_to('../build-android-unsigned.py')
+        with self.assertRaises(ValueError): verification.verify(self.root)
+
+    def test_executable_unchecked_hash_cache_rejected(self):
+        # A real unchecked cache can override a source file even when its bytes
+        # and timestamps are unchanged. It is not harmless generated output.
+        source = self.root/'alternate.py'
+        source.write_text('REPRO_MARKER = True\n')
+        target = self.root/'scripts/__pycache__/helper.cpython-test.pyc'
+        target.parent.mkdir()
+        py_compile.compile(str(source), cfile=str(target), doraise=True,
+                           invalidation_mode=py_compile.PycInvalidationMode.UNCHECKED_HASH)
         with self.assertRaises(ValueError): verification.verify(self.root)
 
     def test_symlink_source(self):

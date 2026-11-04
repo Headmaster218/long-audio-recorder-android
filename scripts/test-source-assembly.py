@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """Offline synthetic Git fixtures for the source assembly command."""
 import hashlib
-import importlib.util
+import types
 import json
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
 
-spec = importlib.util.spec_from_file_location('assembly', Path(__file__).with_name('assemble-source.py'))
-assembly = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(assembly)
+# Compile source bytes directly: neither consume nor create unrecorded .pyc files.
+helper_path = Path(__file__).with_name('assemble-source.py')
+assembly = types.ModuleType('assembly')
+assembly.__file__ = str(helper_path)
+exec(compile(helper_path.read_bytes(), str(helper_path), 'exec'), assembly.__dict__)
 
 
 class AssemblyTest(unittest.TestCase):
