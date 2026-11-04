@@ -1,0 +1,1 @@
+package android.media; public class AudioTimestamp {public static final int TIMEBASE_BOOTTIME=1;public long framePosition,nanoTime;}

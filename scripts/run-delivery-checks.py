@@ -14,7 +14,7 @@ def main():
     out = root/'app/build'/('delivery-checks-' + datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ'))
     out.mkdir(parents=True)
     # SDK-backed shell fixtures need separately compiled Android classes.
-    sdk_suites = {'test-enrollment-consent.sh', 'test-ftps-admission.sh'}
+    sdk_suites = {'test-enrollment-consent.sh', 'test-ftps-admission.sh', 'test-finalize-overflow.sh'}
     # The real FTPS wire fixture is deliberately
     # separate because it needs prepared dependencies and loopback networking.
     suites = sorted(p for p in (root/'scripts').glob('test-*.sh') if p.name not in sdk_suites)
@@ -22,7 +22,7 @@ def main():
     suites += [root/'scripts/test-ftps-wire-readiness.py', root/'scripts/test-source-assembly.py', root/'scripts/test-delivery-verification.py']
     results = []
     report = {'source_commit': source, 'scope': 'offline_host_only', 'passed': False, 'suites': results,
-              'not_run': ['SDK-backed admission and enrollment-consent fixtures', 'official SDK compile/APK packaging (unless separately requested)', 'real FTPS/TLS wire', 'Android runtime/device/OEM', 'physical server', 'all-day recording']}
+              'not_run': ['SDK-backed admission, enrollment-consent and finalize-overflow fixtures', 'official SDK compile/APK packaging (unless separately requested)', 'real FTPS/TLS wire', 'Android runtime/device/OEM', 'physical server', 'all-day recording']}
     for script in suites:
         command = ['sh' if script.suffix == '.sh' else sys.executable, str(script)]
         with (out/(script.name + '.log')).open('w') as log:

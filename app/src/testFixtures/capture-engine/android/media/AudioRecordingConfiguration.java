@@ -1,0 +1,1 @@
+package android.media; public class AudioRecordingConfiguration {private final AudioFormat f; public AudioRecordingConfiguration(AudioFormat f){this.f=f;}public AudioFormat getClientFormat(){return f;}public AudioFormat getFormat(){return f;}public AudioDeviceInfo getAudioDevice(){return new AudioDeviceInfo();}public boolean isClientSilenced(){return false;}}

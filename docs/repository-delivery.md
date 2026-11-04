@@ -39,7 +39,7 @@ point do not contain its delivery runner; use their documented assembly workflow
 Host checks exercise Java policy/storage, recovery, input routing, queue and
 cleanup logic, synthetic Android fixtures, SQLite contracts, delivery encoding,
 assembly provenance and source wiring. The runner excludes SDK-backed admission
-and enrollment-consent tests because they require compiled Android classes, and
+and enrollment-consent tests because they require compiled Android classes, and the SDK-backed finalize-overflow fixture. It also
 excludes the real FTPS/TLS loopback runner because it needs separate dependencies
 and network fixtures. These are stated as NOT RUN, not silently treated as passes.
 Generated test data stays local under ignored build directories. Unrecorded Python

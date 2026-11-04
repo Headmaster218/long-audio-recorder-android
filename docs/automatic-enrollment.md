@@ -52,8 +52,10 @@ Android force-stop/OEM restrictions may still prevent wakes until app reopening.
 
 ## Bounds and data retention
 
-- At most 32 finalize notifications can occupy the worker queue; overflow disables
-  enrollment visibly rather than accumulating unlimited callbacks.
+- At most 32 finalize notifications plus one coalesced overflow-recovery wake
+  can occupy the worker queue. The [November 4 fix](finalize-overflow-20261104.md)
+  retains enrollment consent and schedules bounded discovery of retained files
+  instead of turning enrollment off for this transient backlog.
 - At most 500 queue/history rows and 32 profiles remain the existing limits.
   Capacity includes verified receipts. Capacity/confirmation/discovery failures
   disable enrollment visibly and keep all files and already queued work.

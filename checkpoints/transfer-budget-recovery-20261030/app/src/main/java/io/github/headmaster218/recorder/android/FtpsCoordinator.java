@@ -257,11 +257,26 @@ final class FtpsCoordinator {
     }
     void published(final SegmentStore.Published published) {
         // Never block the capture writer or build an unbounded executor backlog.
-        if (!notifications.tryAcquire()) { overflow.set(true); return; }
+        if (!notifications.tryAcquire()) {
+            // One extra coalesced wake, not another per-recording callback. Do not
+            // revoke consent merely because a slow transfer filled the queue.
+            // Posting here also covers a rejected producer delayed until every
+            // accepted callback has drained: there need not be a later callback.
+            if (overflow.compareAndSet(false,true)) worker.execute(new Runnable() { @Override public void run() {
+                try {
+                    if (!unavailable && queue.automaticRevision() != null) {
+                        capacityWait(); // Durable bounded rediscovery through existing identity/consent gates.
+                        publish("Finalize notifications deferred; automatic enrollment remains enabled. Bounded discovery will inspect retained recordings.",false);
+                        schedule(nextDelay());
+                    }
+                } catch (RuntimeException failed) { fatal(); }
+                finally { overflow.set(false); }
+            } });
+            return;
+        }
         worker.execute(new Runnable() { @Override public void run() {
             try {
                 if (unavailable) return;
-                if (overflow.getAndSet(false)) automaticBlocked("Finalize notification bound reached");
                 String revision = queue.automaticRevision();
                 if (revision != null) {
                     EnrollmentConsent.Ticket ticket=enrollmentConsent.ticket(published.localObjectId,revision);
