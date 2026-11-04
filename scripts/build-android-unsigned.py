@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Linux-first, offline unsigned APK build from an already installed official SDK. Never signs/installs."""
-import argparse, datetime, hashlib, os, pathlib, shutil, signal, subprocess, sys, time, zipfile
+import argparse, datetime, hashlib, json, os, pathlib, shutil, signal, subprocess, sys, time, zipfile
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--sdk', required=True)
@@ -9,6 +9,9 @@ args = parser.parse_args()
 if sys.platform != 'linux':
     raise SystemExit('This guarded direct build is Linux-first; Windows execution remains unvalidated.')
 root = pathlib.Path(__file__).resolve().parents[1]
+# Reject the historical checkout baseline and any modified/incomplete assembly.
+subprocess.run([sys.executable, str(root/'scripts/verify-assembled-source.py'), '--root', str(root)], check=True)
+source_commit = json.loads((root/'ASSEMBLED_SOURCE.json').read_text())['source_commit']
 sdk = pathlib.Path(args.sdk).resolve()
 android = sdk / 'platforms/android-37.0/android.jar'
 build_tools = sdk / 'build-tools/37.0.0'
@@ -21,10 +24,11 @@ FLOOR = 5 * GIB + 9 * GIB // 8  # main 5 GiB floor plus 1.125 GiB external reser
 LIMIT = 24 * 1024**2
 RSS = 256 * 1024**2
 build_root = root/'app/build'
+out = build_root/('direct-' + str(time.time_ns()))
 
 def used_bytes():
-    if not build_root.exists(): return 0
-    return sum(p.stat().st_blocks * 512 for p in build_root.rglob('*') if p.is_file())
+    if not out.exists(): return 0
+    return sum(p.stat().st_blocks * 512 for p in out.rglob('*') if p.is_file())
 
 def guard(before_write=False):
     if datetime.datetime.now(datetime.timezone.utc) >= deadline: raise RuntimeError('Main-project pause deadline reached')
@@ -34,7 +38,6 @@ def guard(before_write=False):
     if available < 2 * GIB: raise RuntimeError('Host memory headroom below 2 GiB')
 
 guard(True)
-out = build_root/('direct-' + str(time.time_ns()))
 for name in ('generated','classes','dex'): (out/name).mkdir(parents=True,exist_ok=True)
 peak = 0
 
@@ -95,5 +98,5 @@ with zipfile.ZipFile(final) as apk:
         if needed not in apk.namelist(): raise RuntimeError('Missing APK member: '+needed)
     if any(name.startswith('META-INF/') for name in apk.namelist()): raise RuntimeError('Unexpected signing metadata')
 hash_value = hashlib.sha256(final.read_bytes()).hexdigest()
-(out/'receipt.txt').write_text('UNSIGNED: not installable until authorized signing.\nSHA256 '+hash_value+'\nSampled observer+children peak MiB '+str(round(peak/1024**2,2))+'\n')
+(out/'receipt.txt').write_text('UNSIGNED: not installable until authorized signing.\nSOURCE_COMMIT '+source_commit+'\nSHA256 '+hash_value+'\nSampled observer+children peak MiB '+str(round(peak/1024**2,2))+'\n')
 print('UNSIGNED_APK '+str(final)+'\nSHA256 '+hash_value+'\nSAMPLED_TOTAL_RSS_MIB '+str(round(peak/1024**2,2))+'\nGENERATED_DISK_BYTES '+str(used_bytes()))

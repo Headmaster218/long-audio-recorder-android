@@ -16,3 +16,6 @@ local.properties
 *.aab
 recordings/
 test-recordings/
+
+__pycache__/
+*.pyc

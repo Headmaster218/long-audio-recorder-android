@@ -1,3 +1,7 @@
+// Do not silently build the historical root baseline. Use the fresh assembly.
+if (file('checkpoints').exists() || !file('ASSEMBLED_SOURCE.json').isFile()) {
+    throw new GradleException('Run python3 scripts/prepare-delivery.py --output ../recorder-delivery from the Git checkout first. Build only its assembled source directory.')
+}
 // Optional Gradle entry point; the local direct-SDK script is the no-download build path.
 // No AGP/Gradle version or wrapper is fetched automatically in this development slice.
 buildscript {

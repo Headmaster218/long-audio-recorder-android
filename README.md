@@ -1,6 +1,38 @@
+# Android recorder: source delivery
+
+**Build the integrated source, not this historical root baseline.** This development
+branch keeps seven ordered checkpoints; the delivery command applies them to a
+fresh directory, verifies every recorded source file, and runs offline host checks.
+The checkout and existing output directories are never overwritten.
+
+```sh
+git clone --branch development/recorder-reliability-recovery-20261031 --single-branch https://github.com/Headmaster218/long-audio-recorder-android.git
+cd long-audio-recorder-android
+python3 scripts/prepare-delivery.py --output ../recorder-delivery
+```
+
+Requires Git, Python 3, a POSIX shell and JDK 21 (including the compiler module).
+No SDK, phone, server, credentials or downloads are needed for those host checks.
+Use a new output path for every run. Only committed source is included.
+For a pinned handoff, add `--ref FULL_COMMIT_SHA`.
+
+To also build an **unsigned** APK, supply an already installed official Android
+SDK (Platform 37.0 and Build-Tools 37.0.0) and a future UTC deadline:
+
+```sh
+python3 scripts/prepare-delivery.py --output ../recorder-delivery-with-apk \
+  --sdk /absolute/path/to/android-sdk --deadline-utc 2026-12-01T12:00:00+00:00
+```
+
+Choose your own future deadline. This does not sign, install, publish or attach an
+APK. Device/OEM behavior, physical-server deployment and all-day recording are
+**not qualified** by host checks or unsigned packaging. See the concise
+[delivery guide](docs/repository-delivery.md) for output files, scope and limits.
+
+## Development history and feature boundaries
+
 > Experimental unpublished recovery integration candidate: [status, finite tests, and device gates](docs/recovery-service-integration-draft.md). Recovery is default-off; no all-day/runtime qualification is claimed.
 
-# Android recorder
 
 Build the integrated candidate from a **fresh assembled directory**, not this
 older root baseline: [reproducible source assembly](docs/source-assembly.md).
