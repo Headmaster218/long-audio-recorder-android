@@ -48,3 +48,29 @@ Tests retain local synthetic evidence under ignored build directories. Ephemeral
 fixture keys are removed in cleanup; no SDK, database, recording or key is stored
 in Git. The integration has a ten-minute overall limit, finite subprocess limits,
 a 16 MiB output cap and a 384 MiB sampled process-tree memory cap.
+
+## Observed results, November 4
+
+The complete production path passed twice and was independently audited:
+
+- Actual persisted five-minute deadline: 319.638 seconds total.
+- Final guarded functional repeat with explicit due-time advance: 21.435 seconds,
+  sampled process-tree peak 182,853,632 bytes (174.4 MiB).
+- Each run: 40 verified SQLite receipts, 40 distinct unchanged attempts, 120 remote
+  file hashes matching receipts, all 40 original local WAVs retained and rehashed.
+- Each run: 40 control TLS / 360 data TLS sessions, 120 uploads and 240 readbacks.
+  Original 36 attempt IDs were unchanged after hard JVM exit; four pending rows
+  completed. Listeners closed and ephemeral keys were removed.
+- Actual queue/coordinator recovery and Disable checks: 144 assertions. Actual
+  production SQLite schema, capacity, transaction rollback and reopen checks:
+  524 assertions across separate JVMs. Full final offline workflow: 44 suites pass.
+
+The final test-source tree at local `6030c5d7c333dfe364aa3a84b91961decf7cd0ae`
+is identical to published `98ac5c02909b17063a4699edbff8d5b76621bf3a`. All 61
+production inputs remain the SDK-qualified notification fix; this batch adds
+qualification fixtures, not another app behavior change.
+
+These results do not guarantee recovery from a full 500-row persistent history.
+Rows lacking completed, authorized local cleanup are intentionally retained.
+Disabling automatic enrollment prevents new admissions; it does not cancel
+previously authorized queued transfers. Pause is the separate transfer control.

@@ -31,6 +31,11 @@ APK. Device/OEM behavior, physical-server deployment and all-day recording are
 [November 4 validation](docs/delivery-validation-20261104.md): 42 host suites,
 official-SDK unsigned packaging and nine real FTPS/TLS loopback cases passed.
 
+Later November 4 runtime checks cover [notification-backlog recovery through
+verified FTPS and restart](docs/catchup-to-verification-20261104.md), including
+actual capture-engine flows. The final offline workflow has 44 suites; device
+and physical-server qualification remain outstanding.
+
 ## Development history and feature boundaries
 
 > Experimental unpublished recovery integration candidate: [status, finite tests, and device gates](docs/recovery-service-integration-draft.md). Recovery is default-off; no all-day/runtime qualification is claimed.
