@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Synthetic delivery-source validation regressions, without SDK/network/device."""
 import hashlib
+import importlib.util
 import types
 import json
 import py_compile
@@ -75,10 +76,15 @@ class VerificationTest(unittest.TestCase):
         # and timestamps are unchanged. It is not harmless generated output.
         source = self.root/'alternate.py'
         source.write_text('REPRO_MARKER = True\n')
-        target = self.root/'scripts/__pycache__/helper.cpython-test.pyc'
+        original = self.root/'scripts/build-android-unsigned.py'
+        target = Path(importlib.util.cache_from_source(str(original)))
         target.parent.mkdir()
         py_compile.compile(str(source), cfile=str(target), doraise=True,
                            invalidation_mode=py_compile.PycInvalidationMode.UNCHECKED_HASH)
+        spec = importlib.util.spec_from_file_location('poisoned_fixture', original)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        self.assertTrue(module.REPRO_MARKER)
         with self.assertRaises(ValueError): verification.verify(self.root)
 
     def test_symlink_source(self):

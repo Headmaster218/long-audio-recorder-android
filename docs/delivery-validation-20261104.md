@@ -25,6 +25,10 @@ only actual `.pyc` files directly under `scripts/__pycache__` are exempt, and
 symlinks are checked first. Regression tests cover both cases. Review found no
 remaining blocking delivery issue.
 
+> Later November 4 review found executable Python caches were not harmless.
+> The [cache-integrity correction](delivery-bytecode-integrity-20261104.md)
+> supersedes the cache exemption above without relabeling historical results.
+
 ## Exact published-source result
 
 A fresh 261-file assembly of that exact commit passed the full one-command
