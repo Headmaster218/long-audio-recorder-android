@@ -33,7 +33,13 @@ def guard():
  global peak
  if time.monotonic()-started>600:raise TimeoutError('Ten-minute integration limit')
  if shutil.disk_usage(root).free<5*1024**3:raise RuntimeError('Five-GiB free-space floor')
- if sum(p.stat().st_size for p in work.rglob('*') if p.is_file())>16*1024**2:raise RuntimeError('16-MiB test-output bound')
+ total=0
+ for path in work.rglob('*'):
+  try:
+   if path.is_file():total+=path.stat().st_size
+  except FileNotFoundError:
+   pass # SQLite legitimately unlinks its transient journal between inspection steps.
+ if total>16*1024**2:raise RuntimeError('16-MiB test-output bound')
  parents={};memory={}
  for path in pathlib.Path('/proc').iterdir():
   if not path.name.isdigit():continue
