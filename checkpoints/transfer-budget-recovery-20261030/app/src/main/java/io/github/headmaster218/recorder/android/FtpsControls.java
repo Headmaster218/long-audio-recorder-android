@@ -29,7 +29,7 @@ final class FtpsControls {
     private final CheckBox remember, budgetEnabled;
     private final TextView savedProfile, status, receipt;
     private final Spinner sources, queued;
-    private final Button save, load, next, add, upload, pause, automatic, cleanup, saveThreshold, saveBudget, resetBudget;
+    private final Button save, load, next, add, upload, pause, automatic, cleanup, historicalCleanup, saveThreshold, saveBudget, resetBudget;
     private CommittedSegments.Page displayed;
     private FtpsCoordinator.Snapshot rendered;
     private String shownRevision;
@@ -66,6 +66,7 @@ final class FtpsControls {
         savedProfile = text(column,"No saved FTPS destination",15);
         automatic = button(column,"Enable automatic enrollment…",new View.OnClickListener() { @Override public void onClick(View v) { confirmAutomatic(); } });
         cleanup = button(column,"Enable verified-transfer local cleanup…",new View.OnClickListener() { @Override public void onClick(View v) { confirmCleanup(); } });
+        historicalCleanup = button(column,"Review existing verified recordings for cleanup…",new View.OnClickListener() { @Override public void onClick(View v) { confirmHistoricalCleanup(); } });
         load = button(column,"Load / refresh completed WAVs for FTPS",new View.OnClickListener() { @Override public void onClick(View v) { localNotice = ""; coordinator.load(null); } });
         sources = new Spinner(activity); column.addView(sources);
         next = button(column,"Next completed-WAV page",new View.OnClickListener() { @Override public void onClick(View v) {
@@ -178,6 +179,35 @@ final class FtpsControls {
                 @Override public void onClick(DialogInterface dialog,int which) { coordinator.cleanupEnabled(true,revision); }
             }).show();
     }
+    private ArrayList<FtpsQueue.Item> historicalSelection(FtpsCoordinator.Snapshot s) {
+        ArrayList<FtpsQueue.Item> selected=new ArrayList<FtpsQueue.Item>();
+        if(s.profile==null || !s.profile.revision.equals(s.cleanupRevision))return selected;
+        for(FtpsQueue.Item item:s.items) {
+            if(!FtpsQueue.historicalCleanupEligible(item,s.profile.revision))continue;
+            boolean needed=false;
+            for(FtpsQueue.Item other:s.items)if(other.key!=item.key && other.source.equals(item.source) && !other.state.equals("VERIFIED_AT_TIME")){needed=true;break;}
+            if(!needed)selected.add(item);
+            if(selected.size()==FtpsQueue.MAX_HISTORICAL_CLEANUP)break;
+        }
+        return selected;
+    }
+    private void confirmHistoricalCleanup() {
+        final FtpsCoordinator.Snapshot s=coordinator.snapshot();
+        final ArrayList<FtpsQueue.Item> selected=historicalSelection(s);
+        if(s.paused || selected.isEmpty()) { localNotice="No eligible selection. Resume transfers and enable cleanup for this exact saved destination first. Uncertain or still-needed recordings are excluded.";render();return; }
+        final String revision=s.profile.revision;
+        final long consentEpoch=coordinator.cleanupConfirmationEpoch();
+        if(consentEpoch<0){localNotice="Cleanup was revoked; review current consent before selecting existing recordings.";render();return;}
+        StringBuilder details=new StringBuilder("Destination: "+s.profile.label()+"\n\nSelected existing recordings ("+selected.size()+"):\n");
+        for(FtpsQueue.Item item:selected)details.append(item.source).append("\n").append(item.bytes).append(" WAV bytes; previously verified ").append(new java.util.Date(item.verifiedAt)).append("\n\n");
+        details.append("This separately authorizes permanent local deletion of exactly these existing recordings, only after a NEW authenticated full readback of each SAME remote attempt and fresh local identity/hash verification. It does not upload again, replace a remote attempt, change destinations or approve any other existing recording. Changed selections or consent are rejected.\n\nThe readback consumes the app transfer budget. Charging, unmetered Wi-Fi, permission, credentials, Pause and Disable still apply. A missing or changed remote copy preserves the local original. A remote copy can still disappear later, making your audio unrecoverable. This is not an immutable backup guarantee.\n\nSuccessful cleanup may let the existing checked history-compaction process free queue capacity. Pending work, other destinations, failures or fragmentation can still block capacity. This does not clear the queue or unpause transfers. Disable blocks new purge authorization; already committed partial purges may finish.");
+        new AlertDialog.Builder(activity).setTitle("Reverify, then delete these local recordings?").setMessage(details.toString())
+            .setNegativeButton("Cancel",null).setPositiveButton("Reverify and clean these recordings",new DialogInterface.OnClickListener(){
+                @Override public void onClick(DialogInterface dialog,int which){
+                    localNotice=coordinator.requestHistoricalCleanup(revision,selected,consentEpoch)?"Historical cleanup request submitted; check the receipt states. No immediate deletion is assumed.":"Transfer worker is busy; nothing was submitted. Review again later.";render();
+                }
+            }).show();
+    }
     private void confirmAutomatic() {
         final FtpsCoordinator.Snapshot s = coordinator.snapshot();
         if (s.automaticRevision != null) { coordinator.automatic(false,null); return; }
@@ -245,12 +275,14 @@ final class FtpsControls {
         threshold.setEnabled(available && s.uploadThresholdBytes > 0);
         cleanup.setEnabled(s.cleanupRevision!=null || (available && s.profile!=null));
         cleanup.setText(s.cleanupRevision==null ? "Enable verified-transfer local cleanup…" : "Disable new local cleanup");
+        historicalCleanup.setEnabled(available && !s.paused && !historicalSelection(s).isEmpty());
         automatic.setEnabled(s.automaticRevision!=null || (available && s.profile!=null));
         automatic.setText(s.automaticRevision == null ? "Enable automatic enrollment…" : "Disable new automatic enrollment");
         save.setEnabled(available); load.setEnabled(available); next.setEnabled(available && displayed != null && displayed.hasMore);
         add.setEnabled(available && s.profile != null && displayed != null && !displayed.entries.isEmpty()); sources.setEnabled(available);
         upload.setEnabled(available && (!s.items.isEmpty() || s.paused)); pause.setEnabled(!s.paused || s.busy);
         String pageInfo = displayed == null ? "" : "\nCompleted page: " + displayed.entries.size() + "; rejected entries: " + displayed.rejected;
+        if(s.items.size()>=FtpsQueue.MAX_ROWS)pageInfo+="\nQueue/history capacity is full. Originals and receipts are retained. For eligible old verified recordings, enable cleanup for their saved destination, then use Review existing verified recordings for cleanup. This requires separate confirmation and fresh remote readback; it is not guaranteed to free every blocked row.";
         status.setText((localNotice.isEmpty() ? "" : localNotice + "\n") + s.notice + "\nSaved upload threshold: " + (s.uploadThresholdBytes > 0 ? s.uploadThresholdBytes + " pending WAV bytes" : "Unavailable") + "\nSaved app budget: " + (s.transferBudget==null ? "Unavailable" : (s.transferBudget.enabled ? "ON" : "OFF") + "; limit " + s.transferBudget.limitBytes + "; charged " + s.transferBudget.chargedBytes + "; manual reset only") + "\nCompacted destination receipts: "+s.retiredCount+" (shown destination: "+s.retiredForCurrent+"). Detailed retired receipts are unavailable; exact dedup history remains. "+s.retirementNotice+"\nQueue records: " + s.items.size()
             + (s.paused ? " · PAUSED" : "") + "\nAutomatic enrollment: " + s.automaticNotice + "\nLocal cleanup: " + s.cleanupLabel + pageInfo);
     }

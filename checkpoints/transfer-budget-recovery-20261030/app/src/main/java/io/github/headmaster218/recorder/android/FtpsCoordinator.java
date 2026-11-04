@@ -118,6 +118,7 @@ final class FtpsCoordinator {
     private boolean retirementBlocked;
     private String retirementNotice="";
     private final AtomicBoolean cleanupRevoked=new AtomicBoolean();
+    private long cleanupRevocationEpoch; // Guarded by this; saturation permanently refuses re-enable in this process.
     private final AtomicBoolean cleanupDisableQueued=new AtomicBoolean();
     private final Semaphore notifications = new Semaphore(32);
     private final AtomicBoolean overflow = new AtomicBoolean();
@@ -387,7 +388,10 @@ final class FtpsCoordinator {
         } });
     }
     void disableCleanup() {
-        cleanupRevoked.set(true);
+        synchronized(this) {
+            cleanupRevoked.set(true);
+            if(cleanupRevocationEpoch<Long.MAX_VALUE)cleanupRevocationEpoch++;
+        }
         if(!cleanupDisableQueued.compareAndSet(false,true)) return;
         worker.execute(new Runnable() { @Override public void run() {
             try { if(!unavailable) { queue.revokeCleanup(); publish("New local cleanup disabled. Previously committed partial purge may finish; no deleted audio can be restored.",false); schedule(nextDelay()); } }
@@ -396,13 +400,40 @@ final class FtpsCoordinator {
         } });
     }
     void cleanupEnabled(final boolean enabled, final String revision) {
+        if(!enabled){disableCleanup();return;}
+        final long requestedEpoch;
+        synchronized(this){requestedEpoch=cleanupRevocationEpoch;}
         command(new Command() { @Override public void run() {
             FtpsQueue.Profile p=queue.current();
-            if(enabled && (p==null || !p.revision.equals(revision))) { publish("Destination changed; review cleanup consent again.",false); return; }
-            queue.revokeCleanup(); queue.cleanupRevision(enabled ? revision : null); cleanupRevoked.set(!enabled);
-            publish(enabled ? "Local cleanup enabled for future freshly verified transfers to this exact destination. Remote future loss remains possible."
-                : "New local cleanup disabled. Already committed partial purge can finish on resume; uncertain files remain.",false);
+            if(p==null || !p.revision.equals(revision)) { publish("Destination changed; review cleanup consent again.",false); return; }
+            queue.revokeCleanup(); queue.cleanupRevision(revision);
+            final boolean admitted;
+            synchronized(FtpsCoordinator.this) {
+                admitted=cleanupRevocationEpoch==requestedEpoch && cleanupRevocationEpoch<Long.MAX_VALUE;
+                if(admitted)cleanupRevoked.set(false);
+            }
+            if(!admitted) {
+                queue.revokeCleanup();
+                publish("Cleanup enable was superseded by Disable. Existing recordings remain protected from new cleanup.",false);
+                return;
+            }
+            publish("Local cleanup enabled for future freshly verified transfers to this exact destination. Remote future loss remains possible.",false);
         } });
+    }
+    /** Explicit bounded historical cleanup request; never enables consent or rewrites an attempt. */
+    synchronized long cleanupConfirmationEpoch(){return cleanupRevoked.get() || cleanupRevocationEpoch==Long.MAX_VALUE ? -1 : cleanupRevocationEpoch;}
+    boolean requestHistoricalCleanup(final String revision,final List<FtpsQueue.Item> shown,final long requestedEpoch) {
+        if(shown==null || shown.isEmpty() || shown.size()>FtpsQueue.MAX_HISTORICAL_CLEANUP)throw new IllegalArgumentException("Select at most eight eligible receipts");
+        final List<FtpsQueue.Item> approved=Collections.unmodifiableList(new ArrayList<FtpsQueue.Item>(shown));
+        return command(new Command(){@Override public void run()throws IOException {
+            final boolean admitted;
+            synchronized(FtpsCoordinator.this){admitted=requestedEpoch>=0 && !cleanupRevoked.get() && cleanupRevocationEpoch==requestedEpoch && cleanupRevocationEpoch<Long.MAX_VALUE;}
+            if(!admitted || pauseRequested.get() || queue.paused()) {
+                publish("Historical cleanup request was revoked or paused. No new readback or deletion was authorized.",false);return;
+            }
+            int count=queue.requestHistoricalCleanup(revision,approved);
+            publish("Explicit readback-then-cleanup requested for "+count+" displayed existing recordings. Fresh exact-attempt verification and all cleanup safety gates remain required; no files were deleted by this request.",false);
+        }});
     }
     private static final class CleanupDeferred extends IOException {
         private static final long serialVersionUID=1L;

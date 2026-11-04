@@ -178,6 +178,68 @@ final class FtpsQueue extends SQLiteOpenHelper {
     List<Item> retiring() {
         List<Item> result=new ArrayList<Item>();for(Item item:items(false))if(item.retirementGeneration>=0)result.add(item);return result;
     }
+    /** Explicit historical selection only; never inferred from future-only cleanup consent. */
+    static final int MAX_HISTORICAL_CLEANUP = 8;
+    static boolean historicalCleanupEligible(Item item,String revision) {
+        if (!hash(revision) || item == null || !revision.equals(item.revision) || item.key <= 0 || !"VERIFIED_AT_TIME".equals(item.state)
+            || !("NONE".equals(item.cleanupState) || "RETAINED".equals(item.cleanupState))
+            || item.retirementGeneration != -1 || item.cleanupBinding != null
+            || item.bytes <= 44 || item.bytes > 0xffffffffL + 8 || (item.bytes - 44) % 2 != 0
+            || item.verifiedAt <= 0 || !hash(item.revision) || !hash(item.wavHash)
+            || !hash(item.metadataHash) || !hash(item.resultMetadataHash) || !hash(item.markerHash)
+            || item.attempt == null || !item.attempt.matches("r-[0-9a-f]{64}-[0-9a-f]{32}")) return false;
+        try { SegmentIdentity.parse(item.source); }
+        catch (IOException | RuntimeException invalid) { return false; }
+        String binding = digest((item.source + "\n" + item.wavHash + "\n" + item.revision).getBytes(StandardCharsets.UTF_8));
+        return item.attempt.startsWith("r-" + binding + "-");
+    }
+    private static boolean hash(String value) { return value != null && value.matches("[0-9a-f]{64}"); }
+    private static boolean sameHistoricalSelection(Item shown,Item current) {
+        return historicalCleanupEligible(shown,shown == null ? null : shown.revision) && historicalCleanupEligible(current,shown.revision)
+            && shown.key == current.key && shown.source.equals(current.source)
+            && shown.revision.equals(current.revision) && shown.attempt.equals(current.attempt)
+            && shown.bytes == current.bytes && shown.wavHash.equals(current.wavHash)
+            && shown.metadataHash.equals(current.metadataHash)
+            && shown.resultMetadataHash.equals(current.resultMetadataHash)
+            && shown.markerHash.equals(current.markerHash) && shown.verifiedAt == current.verifiedAt
+            && shown.cleanupState.equals(current.cleanupState);
+    }
+    /**
+     * Queue only the exact separately confirmed historical rows for fresh readback.
+     * Does not enable cleanup, unpause, remove files, or assert any new remote verification.
+     * All validation and changes are one transaction; stale/invalid batches change nothing.
+     */
+    int requestHistoricalCleanup(String revision,List<Item> shown) throws IOException {
+        if (!hash(revision) || shown == null || shown.isEmpty() || shown.size() > MAX_HISTORICAL_CLEANUP)
+            throw new IOException("Select one to eight eligible historical recordings");
+        List<Item> selection = new ArrayList<Item>(shown);
+        if (selection.isEmpty() || selection.size() > MAX_HISTORICAL_CLEANUP)
+            throw new IOException("Historical selection size changed; review again");
+        SQLiteDatabase db = getWritableDatabase(); db.beginTransaction();
+        try {
+            Profile saved = current();
+            if (saved == null || !revision.equals(saved.revision) || !revision.equals(cleanupRevision()) || paused())
+                throw new IOException("Destination, cleanup consent or pause state changed; review again");
+            Map<Long,Item> current = new HashMap<Long,Item>();
+            for (Item item : items(false)) current.put(item.key,item);
+            java.util.HashSet<Long> selected = new java.util.HashSet<Long>();
+            for (Item item : selection) {
+                if (item == null || !selected.add(item.key) || !revision.equals(item.revision)
+                    || !sameHistoricalSelection(item,current.get(item.key)) || otherNeedsSource(item)
+                    || retiredContains(item.source,item.revision))
+                    throw new IOException("Historical selection changed or is unavailable; no recordings were queued");
+            }
+            for (Item item : selection) {
+                ContentValues values = new ContentValues(); values.put("cleanup_state","DEFERRED");
+                values.putNull("cleanup_binding"); values.put("next_at",0);
+                values.put("detail","Explicit historical cleanup selection; fresh exact-attempt readback required before local cleanup");
+                if (db.update("queue",values,"id=? AND state='VERIFIED_AT_TIME' AND cleanup_state=? AND attempt=? AND verified_at=?",
+                        new String[]{String.valueOf(item.key),item.cleanupState,item.attempt,String.valueOf(item.verifiedAt)}) != 1)
+                    throw new IOException("Historical selection changed; no recordings were queued");
+            }
+            db.setTransactionSuccessful(); return selection.size();
+        } finally { db.endTransaction(); }
+    }
     List<Item> retirementCandidates() {
         List<Item> result=new ArrayList<Item>();for(Item item:items(false))if(item.cleanupState.equals("REMOVED")&&item.retirementGeneration<0)result.add(item);return result;
     }
