@@ -36,6 +36,11 @@ verified FTPS and restart](docs/catchup-to-verification-20261104.md), including
 actual capture-engine flows. The final offline workflow has 44 suites; device
 and physical-server qualification remain outstanding.
 
+Retained verified receipts can now be separately selected for fresh readback and
+safe cleanup to recover full-queue capacity. See [historical cleanup recovery and
+revocation tests](docs/historical-cleanup-recovery-20261104.md). This requires its
+own explicit confirmation and never clears unverified recordings or queue rows.
+
 ## Development history and feature boundaries
 
 > Experimental unpublished recovery integration candidate: [status, finite tests, and device gates](docs/recovery-service-integration-draft.md). Recovery is default-off; no all-day/runtime qualification is claimed.

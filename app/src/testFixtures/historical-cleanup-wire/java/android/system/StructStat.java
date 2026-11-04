@@ -1,0 +1,1 @@
+package android.system;public final class StructStat {public final long st_dev,st_ino;public final int st_mode;public final StructTimespec st_ctim;StructStat(long d,long i,int m,StructTimespec t){st_dev=d;st_ino=i;st_mode=m;st_ctim=t;}}
