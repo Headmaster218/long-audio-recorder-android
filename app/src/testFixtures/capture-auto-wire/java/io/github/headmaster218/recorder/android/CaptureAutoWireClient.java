@@ -1,0 +1,30 @@
+package io.github.headmaster218.recorder.android;
+import android.content.Context;import android.media.AudioRecord;import android.os.SystemClock;import io.github.headmaster218.recorder.core.*;import java.nio.file.*;import java.nio.charset.StandardCharsets;import java.util.*;import java.util.concurrent.*;
+/** Actual CaptureEngine -> actual finalize callbacks -> SQLite -> threshold -> actual FTPS. */
+public final class CaptureAutoWireClient {
+ static int assertions;static void yes(boolean v,String m){assertions++;if(!v)throw new AssertionError(m);}
+ @SuppressWarnings("unchecked") static void installFixturePassword(RealCoordinatorHarness h)throws Exception{((Map<String,char[]>)RealCoordinatorHarness.get(h.coordinator,"sessionPasswords")).put(h.queue.current().revision,"synthetic".toCharArray());}
+ public static void main(String[] args)throws Exception{
+  Path root=Paths.get(args[0]).toAbsolutePath();Context context=new Context(root.toFile());
+  context.connectivity.networks.put(new android.net.Network(),new android.net.NetworkCapabilities().addTransportType(android.net.NetworkCapabilities.TRANSPORT_WIFI).addCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED).addCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_VPN).addCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_ROAMING).addCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_SUSPENDED));FtpsQueue q=new FtpsQueue(context);
+  // Explicit fixture setup grants destination-pinned automatic enrollment; not a UI consent test.
+  FtpsQueue.Profile p=q.save(new FtpsTransfer.Profile("127.0.0.1",Integer.parseInt(args[1]),"synthetic","/fixture"),null);q.automatic(p.revision,"fixture explicit auto-enrollment consent");q.uploadThresholdBytes(108,UploadThreshold.DEFAULT_BYTES);
+  RealCoordinatorHarness h=new RealCoordinatorHarness(context,q);installFixturePassword(h);
+  java.lang.reflect.Field singleton=FtpsCoordinator.class.getDeclaredField("instance");singleton.setAccessible(true);singleton.set(null,h.coordinator);
+  AudioRecord.Scenario scenario=new AudioRecord.Scenario();scenario.samples=32;AudioRecord.scenario=scenario;
+  CountDownLatch completed=new CountDownLatch(1);CaptureEvidence.Result[] evidence=new CaptureEvidence.Result[1];Throwable[] uncaught=new Throwable[1];int[] completions={0},first={0};boolean[] paused={true};
+  CaptureEngine engine=new CaptureEngine(context,new RecordingSettings(8000,1,1,16),"automatic-capture-fixture",0,false,new CaptureEngine.Completion(){
+   public void finished(CaptureEngine e,String text,boolean p,long epoch){throw new AssertionError("typed completion required");}
+   public void firstPcm(CaptureEngine e,CaptureEvidence.FirstPcm observation){first[0]++;e.requestStop(CaptureEngine.Stop.STOP);}
+   public void finished(CaptureEngine e,CaptureEvidence.Result result,String text,boolean p,long epoch){evidence[0]=result;completions[0]++;paused[0]=p;completed.countDown();}
+  });
+  Thread worker=new Thread(engine,"actual-capture-fixture");worker.setUncaughtExceptionHandler((t,e)->{uncaught[0]=e;completed.countDown();});worker.start();yes(completed.await(10,TimeUnit.SECONDS),"capture completed");worker.join(5000);yes(!worker.isAlive()&&uncaught[0]==null,"capture worker exited cleanly: "+uncaught[0]);yes(completions[0]==1&&first[0]==1&&!paused[0],"one normal STOP completion");yes(evidence[0].failureMask==0&&evidence[0].pcm.readSamples==32&&evidence[0].pcm.confirmedSamples==32,"actual read/append accounting");yes(scenario.stopCalls==1&&scenario.releaseCalls==1,"audio cleanup once");
+  yes(h.worker.size()==2,"actual published and captureClosed each queued work");yes(h.permits.availablePermits()==31,"actual published callback holds one admission permit");yes(q.items(false).isEmpty(),"no manual enqueue and worker not yet drained");
+  h.worker.drain();h.assertAvailable();yes(h.permits.availablePermits()==32,"publication permit released");yes(q.items(false).size()==1,"actual publication callback enrolled one file");FtpsQueue.Item item=q.items(false).get(0);yes(item.state.equals("QUEUED")&&item.attempt==null&&!item.uploadNow,"automatic queue entry, no uploadNow");yes(item.bytes==108&&q.uploadThresholdBytes()==108,"exact configured byte threshold");
+  java.lang.reflect.Method next=FtpsCoordinator.class.getDeclaredMethod("nextDelay");next.setAccessible(true);yes(((Long)next.invoke(h.coordinator))>=0,"threshold schedules transfer after stop");
+  CommittedSegments catalog=new CommittedSegments(root.resolve("audio-spool"));CommittedSegments.Entry entry=catalog.load(item.source);yes(entry.metadata.closeReason==CaptureTimeline.Close.STOP,"actual STOP manifest");byte[] wav=Files.readAllBytes(root.resolve("audio-spool").resolve(item.source).resolve("audio.wav"));for(int n=0;n<32;n++)yes((wav[44+n*2]&255)==n+1&&wav[45+n*2]==0,"scripted PCM byte exact");
+  FtpsCoordinator.Job job=new FtpsCoordinator.Job();job.deadline=SystemClock.elapsedRealtime()+FtpsNetwork.ATTEMPT_MILLIS;h.runOne(job);h.assertAvailable();item=q.items(false).get(0);yes(item.state.equals("VERIFIED_AT_TIME")&&item.verifiedAt>0,"threshold-triggered actual FTPS verification");yes(!item.uploadNow,"no manual upload trigger ever used");catalog.verify(catalog.load(item.source),()->false);yes(item.cleanupState.equals("NONE"),"cleanup remains off; original preserved");
+  Files.write(root.resolve("genuine-receipt.tsv"),Collections.singletonList(item.source+"\t"+item.attempt+"\t"+item.wavHash+"\t"+item.resultMetadataHash+"\t"+item.markerHash),StandardCharsets.UTF_8);String attempt=item.attempt;q.close();q=new FtpsQueue(context);yes(q.items(false).get(0).attempt.equals(attempt)&&q.items(false).get(0).state.equals("VERIFIED_AT_TIME"),"verified receipt survives SQLite reopen");q.close();yes(context.receiversReleased()&&context.connectivity.callbacksReleased()&&android.system.Os.openCount()==0,"network and directory resources released");singleton.set(null,null);
+  System.out.println("PASS actual capture -> callbacks -> automatic queue -> threshold -> FTPS: "+assertions+" assertions; no manual enqueue or uploadNow");
+ }
+}

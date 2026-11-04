@@ -41,6 +41,10 @@ safe cleanup to recover full-queue capacity. See [historical cleanup recovery an
 revocation tests](docs/historical-cleanup-recovery-20261104.md). This requires its
 own explicit confirmation and never clears unverified recordings or queue rows.
 
+See [recording-to-upload usability checks](docs/capture-upload-usability-20261104.md)
+for the remembered-credential recovery fix, connected capture/automatic-upload
+fixture, and the unchanged below-threshold tail behavior.
+
 ## Development history and feature boundaries
 
 > Experimental unpublished recovery integration candidate: [status, finite tests, and device gates](docs/recovery-service-integration-draft.md). Recovery is default-off; no all-day/runtime qualification is claimed.
