@@ -2,6 +2,9 @@ package io.github.headmaster218.recorder.android;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.DialogInterface;
+import io.github.headmaster218.recorder.core.OfflineDayPlan;
 import android.app.NotificationManager;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -29,7 +32,8 @@ public final class MainActivity extends Activity {
     private ExportControls exports;
     private FtpsControls ftps;
     private InputControls inputs;
-    private Button start, pause, stop;
+    private Button start, pause, stop, planDay;
+    private final io.github.headmaster218.recorder.core.ReadOnlyPlanGate planGate=new io.github.headmaster218.recorder.core.ReadOnlyPlanGate();
     private Button recoverSealed,cancelRecovery;
     private TextView recoveryStatus;
     private SealedRecoveryCoordinator sealedRecovery;
@@ -44,7 +48,8 @@ public final class MainActivity extends Activity {
             status.setText(localError != null && !RecorderState.active ? localError : RecorderState.display(MainActivity.this));
             boolean running = RecorderState.active;
             capacity.setText(RecordingCapacityDisplay.display(running));
-            start.setEnabled(!running && !pending.waiting() && !sealedRecovery.busy()); pause.setEnabled(running || pending.waiting());
+            start.setEnabled(!running && !pending.waiting() && !sealedRecovery.busy() && !planGate.busy());
+            planDay.setEnabled(!running && !pending.waiting() && !sealedRecovery.busy() && !planGate.busy()); pause.setEnabled(running || pending.waiting());
             recoverSealed.setEnabled(!running && !pending.waiting() && !sealedRecovery.busy());
             cancelRecovery.setEnabled(sealedRecovery.busy());
             recoveryStatus.setText(sealedRecovery.status());
@@ -81,6 +86,8 @@ public final class MainActivity extends Activity {
         channels = number(column,"Channels: 1 mono or 2 stereo",String.valueOf(defaults.channels),102);
         seconds = number(column,"Segment duration (seconds)",String.valueOf(defaults.seconds),103);
         cache = number(column,"Spool maximum (MiB); 32 MiB free-space reserve",String.valueOf(defaults.cacheBytes / RecordingSettings.MIB),104);
+        planDay=button(column,"Plan 24-hour offline cache…",new View.OnClickListener() { @Override public void onClick(View v) { planOfflineDay(); } });
+        text(column,"The default 512 MiB cache is not enough for a day at 16 kHz mono. Plan a larger cache using current format and existing files. Planning never saves, records, uploads or deletes anything.",14);
         button(column,"Save settings",new View.OnClickListener() { @Override public void onClick(View v) { saveSettings(); } });
         text(column,"Save stores only these four defaults. Start uses the displayed values without saving. Neither opening this screen nor saving starts recording. Saving never changes an active run.",14);
         inputs = new InputControls(this,column);
@@ -117,6 +124,39 @@ public final class MainActivity extends Activity {
     private RecordingSettings displayedSettings() {
         return new RecordingSettings(Integer.parseInt(rate.getText().toString()),Integer.parseInt(channels.getText().toString()),Integer.parseInt(seconds.getText().toString()),Long.parseLong(cache.getText().toString()),inputs.snapshot());
     }
+    private void planOfflineDay() {
+        if(!resumed || RecorderState.active || pending.waiting() || sealedRecovery.busy() || planGate.busy())return;
+        final RecordingSettings proposed;
+        try {
+            // Validate format independently of a too-small existing cache field.
+            proposed=new RecordingSettings(Integer.parseInt(rate.getText().toString()),Integer.parseInt(channels.getText().toString()),Integer.parseInt(seconds.getText().toString()),262144,inputs.snapshot());
+        } catch(IllegalArgumentException invalid){message(invalid.getMessage());return;}
+        final java.nio.file.Path files;
+        try {files=getFilesDir().toPath();}catch(RuntimeException unavailable){message("Private storage is unavailable. Try again.");return;}
+        final Object planTicket=planGate.begin();planDay.setEnabled(false);start.setEnabled(false);
+        try {Thread planner=new Thread(new Runnable(){@Override public void run(){
+            OfflineDayPlan result=null;String error=null;
+            try {result=OfflineDayPlan.inspect(files,proposed.rate,proposed.channels,proposed.seconds);}
+            catch(java.io.IOException | RuntimeException failed){error="24-hour plan unavailable: "+failed.getMessage();}
+            final OfflineDayPlan plan=result;final String failure=error;
+            main.post(new Runnable(){@Override public void run(){
+                if(!planGate.finish(planTicket))return;
+                if(!resumed || isFinishing() || isDestroyed() || RecorderState.active)return;
+                if(failure!=null){message(failure);return;}
+                new AlertDialog.Builder(MainActivity.this).setTitle("24-hour offline cache plan")
+                    .setMessage("Format: "+proposed.rate+" Hz, "+proposed.channels+" channel(s), "+proposed.seconds+" s segments.\nProposed cache maximum: "+plan.cacheMiB+" MiB. Existing spool: "+plan.existingBytes+" bytes / "+plan.existingObjects+" objects.\nRequired currently free storage: "+plan.requiredFreeBytes+" bytes, including 32 MiB reserve. Observed free (snapshot, not reserved): "+plan.observedFreeBytes+" bytes.\n\nSized for at least 24 hours of PCM plus bounded metadata and a 5% planning margin at steady input, without network or future cleanup. This is a storage budget, not proof existing files are healthy or recording will start. It does not reserve disk space or guarantee Android stays recording. Route changes, other disk use, battery or errors can stop earlier. If storage fills, recording stops and files are preserved, never overwritten.\n\nThis may retain several GiB of private audio. Transfers and cleanup remain separately controlled; uploads require their existing conditions. Apply changes only the cache field. Save is separate; Start remains explicit.")
+                    .setNegativeButton("Cancel",null).setPositiveButton("Apply "+plan.cacheMiB+" MiB",new DialogInterface.OnClickListener(){@Override public void onClick(DialogInterface dialog,int which){
+                        if(!resumed || RecorderState.active || pending.waiting() || sealedRecovery.busy())return;
+                        try {
+                            if(Integer.parseInt(rate.getText().toString())!=proposed.rate || Integer.parseInt(channels.getText().toString())!=proposed.channels || Integer.parseInt(seconds.getText().toString())!=proposed.seconds){message("Format changed. Run the 24-hour plan again.");return;}
+                            cache.setText(Long.toString(plan.cacheMiB));localError=null;
+                            Toast.makeText(MainActivity.this,"Cache field updated only. Save or Start remains your choice; available space may change.",Toast.LENGTH_LONG).show();
+                        } catch(IllegalArgumentException changed){message("Format changed. Run the 24-hour plan again.");}
+                    }}).show();
+            }});
+        }},"recorder-capacity-plan");
+        planner.start();}catch(RuntimeException failed){planGate.finish(planTicket);message("Capacity check did not start. Try again.");}
+    }
     private void saveSettings() {
         try {
             String failure = settingsStore.save(displayedSettings());
@@ -125,7 +165,7 @@ public final class MainActivity extends Activity {
         } catch (IllegalArgumentException failure) { message(failure.getMessage()); }
     }
     private void requestStart() {
-        if (!resumed || RecorderState.active || pending.waiting() || sealedRecovery.busy()) return;
+        if (!resumed || RecorderState.active || pending.waiting() || sealedRecovery.busy() || planGate.busy()) return;
         localError = null;
         pendingRecoveryOptIn = recovery.isChecked();
         final RecordingSettings snapshot;
@@ -169,5 +209,5 @@ public final class MainActivity extends Activity {
     }
     @Override protected void onDestroy() { pending.cancel(); pendingRecoveryOptIn = false; super.onDestroy(); }
     @Override protected void onResume() { super.onResume(); resumed = true; main.post(refresh); }
-    @Override protected void onPause() { resumed = false; main.removeCallbacks(refresh); super.onPause(); }
+    @Override protected void onPause() { resumed = false; planGate.cancel(); main.removeCallbacks(refresh); super.onPause(); }
 }

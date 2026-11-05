@@ -45,6 +45,8 @@ See [recording-to-upload usability checks](docs/capture-upload-usability-2026110
 for the remembered-credential recovery fix, connected capture/automatic-upload
 fixture, and the unchanged below-threshold tail behavior.
 
+For a user-selected offline day of storage, see [24-hour cache planning](docs/offline-day-cache-plan-20261105.md). This sizes storage without assuming network access or enabling deletion; it is not a device endurance guarantee.
+
 ## Development history and feature boundaries
 
 > Experimental unpublished recovery integration candidate: [status, finite tests, and device gates](docs/recovery-service-integration-draft.md). Recovery is default-off; no all-day/runtime qualification is claimed.
