@@ -78,8 +78,10 @@ final class CaptureEngine implements Runnable {
     private volatile String failure;
     private volatile boolean producerDone;
     private long epochNumber;
+    private long nextCapacitySample;
     private boolean firstPcmEmitted; // Storage-worker confined; avoid later per-block observation work.
     CaptureEngine(Context context,RecordingSettings settings,String captureId,long epoch,boolean resumedCapture,Completion completion) {
+        RecordingCapacityDisplay.clear();
         this.context = context; this.settings = settings; this.captureId = captureId; this.epochNumber = epoch;
         this.resumedCapture = resumedCapture; this.completion = completion;
         inputPolicy = new InputRoutePolicy(settings.input);
@@ -154,6 +156,12 @@ final class CaptureEngine implements Runnable {
                     if (!accounting.appendConfirmed(block.count)) throw new CaptureFailure(Failure.PCM_ACCOUNTING,"PCM acknowledgement counters overflowed");
                     firstAppended(block,current);
                     RecorderState.writtenFrames += block.count / settings.channels;
+                    long now=System.nanoTime();
+                    if(nextCapacitySample==0 || now-nextCapacitySample>=0) {
+                        nextCapacitySample=now+1000000000L;
+                        try { RecordingCapacityDisplay.update(spool.recordingCapacity(settings.format.bytesForFrames(settings.targetFrames),settings.seconds,2L*BLOCKS*BLOCK_SAMPLES)); }
+                        catch(IOException | RuntimeException unavailable) { RecordingCapacityDisplay.clear(); }
+                    }
                     RecorderState.route = "Requested: " + settings.requestedInput() + "\nActual: " + current.route; previous = current;
                 } finally { block.snapshot = null; block.observation = null; free.offer(block); }
             }

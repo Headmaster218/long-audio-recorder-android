@@ -10,7 +10,7 @@ fi
 mkdir -p app/build/capture-engine-tests
 out=$(mktemp -d app/build/capture-engine-tests/run-XXXXXX)
 find app/src/main/java/io/github/headmaster218/recorder/core -name '*.java' | LC_ALL=C sort > "$out/sources.txt"
-for name in CaptureEngine InputDevices RecordingSettings SpoolAdmission; do
+for name in CaptureEngine InputDevices RecordingSettings SpoolAdmission RecordingCapacityDisplay; do
     printf '%s\n' "app/src/main/java/io/github/headmaster218/recorder/android/$name.java" >> "$out/sources.txt"
 done
 find app/src/testFixtures/capture-engine -name '*.java' | LC_ALL=C sort >> "$out/sources.txt"

@@ -25,7 +25,7 @@ import java.util.Map;
 public final class MainActivity extends Activity {
     private final Handler main = new Handler(Looper.getMainLooper());
     private EditText rate, channels, seconds, cache;
-    private TextView status;
+    private TextView status, capacity;
     private ExportControls exports;
     private FtpsControls ftps;
     private InputControls inputs;
@@ -43,6 +43,7 @@ public final class MainActivity extends Activity {
             if (!resumed) return;
             status.setText(localError != null && !RecorderState.active ? localError : RecorderState.display(MainActivity.this));
             boolean running = RecorderState.active;
+            capacity.setText(RecordingCapacityDisplay.display(running));
             start.setEnabled(!running && !pending.waiting() && !sealedRecovery.busy()); pause.setEnabled(running || pending.waiting());
             recoverSealed.setEnabled(!running && !pending.waiting() && !sealedRecovery.busy());
             cancelRecovery.setEnabled(sealedRecovery.busy());
@@ -89,6 +90,7 @@ public final class MainActivity extends Activity {
         pause = button(column,"Pause",new View.OnClickListener() { @Override public void onClick(View v) { command(RecordingService.PAUSE); } });
         stop = button(column,"Stop",new View.OnClickListener() { @Override public void onClick(View v) { command(RecordingService.STOP); } });
         status = text(column,"Idle",16);
+        capacity = text(column,RecordingCapacityDisplay.display(false),14);
         text(column,"Pause ends this AudioRecord run. Resume within the same process uses a new run and uncertain epoch. After process restart, Start creates a fresh capture. Stop ends the capture. App recreation never restarts recording. Completed files can be copied with the manual export controls below; originals remain app-private unless separate verified-transfer cleanup is enabled.",14);
         text(column,"Android may let you dismiss the ongoing notification. A swipe alone does not stop recording or trigger forced reposts. Reopen this app for Stop/Pause; Android microphone/active-app controls remain available where supported.",14);
         sealedRecovery=SealedRecoveryCoordinator.get(this);

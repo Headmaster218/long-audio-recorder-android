@@ -283,7 +283,12 @@ final class FtpsControls {
         upload.setEnabled(available && (!s.items.isEmpty() || s.paused)); pause.setEnabled(!s.paused || s.busy);
         String pageInfo = displayed == null ? "" : "\nCompleted page: " + displayed.entries.size() + "; rejected entries: " + displayed.rejected;
         if(s.items.size()>=FtpsQueue.MAX_ROWS)pageInfo+="\nQueue/history capacity is full. Originals and receipts are retained. For eligible old verified recordings, enable cleanup for their saved destination, then use Review existing verified recordings for cleanup. This requires separate confirmation and fresh remote readback; it is not guaranteed to free every blocked row.";
-        status.setText((localNotice.isEmpty() ? "" : localNotice + "\n") + s.notice + "\nSaved upload threshold: " + (s.uploadThresholdBytes > 0 ? s.uploadThresholdBytes + " pending WAV bytes" : "Unavailable") + "\nSaved app budget: " + (s.transferBudget==null ? "Unavailable" : (s.transferBudget.enabled ? "ON" : "OFF") + "; limit " + s.transferBudget.limitBytes + "; charged " + s.transferBudget.chargedBytes + "; manual reset only") + "\nCompacted destination receipts: "+s.retiredCount+" (shown destination: "+s.retiredForCurrent+"). Detailed retired receipts are unavailable; exact dedup history remains. "+s.retirementNotice+"\nQueue records: " + s.items.size()
+        int verified=0, unverified=0;
+        for(FtpsQueue.Item item:s.items) {
+            if("VERIFIED_AT_TIME".equals(item.state))verified++;else unverified++;
+        }
+        String transferSummary=TransferProgressDisplay.describe(s.uploadThresholdBytes,unverified,verified);
+        status.setText(transferSummary+"\n"+(localNotice.isEmpty() ? "" : localNotice + "\n") + s.notice + "\nSaved upload threshold: " + (s.uploadThresholdBytes > 0 ? s.uploadThresholdBytes + " pending WAV bytes" : "Unavailable") + "\nSaved app budget: " + (s.transferBudget==null ? "Unavailable" : (s.transferBudget.enabled ? "ON" : "OFF") + "; limit " + s.transferBudget.limitBytes + "; charged " + s.transferBudget.chargedBytes + "; manual reset only") + "\nCompacted destination receipts: "+s.retiredCount+" (shown destination: "+s.retiredForCurrent+"). Detailed retired receipts are unavailable; exact dedup history remains. "+s.retirementNotice+"\nQueue records: " + s.items.size()
             + (s.paused ? " · PAUSED" : "") + "\nAutomatic enrollment: " + s.automaticNotice + "\nLocal cleanup: " + s.cleanupLabel + pageInfo);
     }
     private void receipt() {

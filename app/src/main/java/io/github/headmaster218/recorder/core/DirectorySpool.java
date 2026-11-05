@@ -182,6 +182,12 @@ public final class DirectorySpool implements SegmentStore, AutoCloseable {
         Path relative=root.relativize(path); usage.charge(relative.getName(0).toString(),bytes);
     }
     long chargedBytes() { return usage.total(); }
+    /** Storage-worker snapshot only; never opens a second owner or credits pending cleanup. */
+    public RecordingCapacity recordingCapacity(long segmentPcmBytes,int seconds,long bufferedBytes) throws IOException {
+        live();
+        return RecordingCapacity.estimate(cache.maximumBytes,usage.total(),Files.getFileStore(root).getUsableSpace(),
+            cache.minimumFreeBytes,usage.objects(),segmentPcmBytes,seconds,bufferedBytes);
+    }
     private void budget(long growth, boolean reserveFinalization) throws IOException {
         live(); long required = Checks.add(growth, reserveFinalization ? FINALIZATION_RESERVE : RetirementSentinel.MAX_FILE_BYTES);
         if (cache.beforeWrite(usage.total(), Files.getFileStore(root).getUsableSpace(), required) != CachePolicy.Decision.CONTINUE)
